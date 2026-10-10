@@ -37,11 +37,6 @@ class FakeVectorStoreThatCannotList:
         raise RuntimeError("chroma unreachable")
 
 
-class FakeDeduplicator:
-    def embedding_text_for_event(self, event):
-        return f"{event.title} {event.description or ''}".strip()
-
-
 def _db_session():
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(bind=engine, tables=[Event.__table__, EventSource.__table__])
@@ -67,7 +62,7 @@ def test_missing_events_are_reindexed() -> None:
 
         store = FakeVectorStore(indexed_ids=[f"event_{indexed.id}"])
 
-        summary = reconcile_vector_index(db, store, deduplicator=FakeDeduplicator())
+        summary = reconcile_vector_index(db, store)
 
         assert summary == {"candidates": 3, "missing": 2, "indexed": 2, "failed": 0}
         assert {doc_id for doc_id, _, _ in store.added} == {
@@ -83,7 +78,7 @@ def test_fully_indexed_corpus_is_a_no_op() -> None:
         event = _event(db, "Only event")
         store = FakeVectorStore(indexed_ids=[f"event_{event.id}"])
 
-        summary = reconcile_vector_index(db, store, deduplicator=FakeDeduplicator())
+        summary = reconcile_vector_index(db, store)
 
         assert summary["missing"] == 0
         assert store.added == []
@@ -102,7 +97,7 @@ def test_open_opportunity_older_than_the_window_is_still_reconciled() -> None:
         )
         store = FakeVectorStore()
 
-        summary = reconcile_vector_index(db, store, deduplicator=FakeDeduplicator())
+        summary = reconcile_vector_index(db, store)
 
         assert summary["indexed"] == 1
         assert store.added[0][0] == f"event_{old_open.id}"
@@ -120,7 +115,7 @@ def test_stale_closed_event_is_not_reconciled() -> None:
         )
         store = FakeVectorStore()
 
-        summary = reconcile_vector_index(db, store, deduplicator=FakeDeduplicator())
+        summary = reconcile_vector_index(db, store)
 
         assert summary["candidates"] == 0
         assert store.added == []
@@ -133,7 +128,7 @@ def test_unreachable_index_degrades_without_raising() -> None:
     try:
         _event(db, "Something")
         summary = reconcile_vector_index(
-            db, FakeVectorStoreThatCannotList(), deduplicator=FakeDeduplicator()
+            db, FakeVectorStoreThatCannotList()
         )
 
         assert summary["candidates"] == 1
