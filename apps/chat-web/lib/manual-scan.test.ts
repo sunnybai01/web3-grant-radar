@@ -27,6 +27,7 @@ describe("manual scan helpers", () => {
           verified: 1,
           fraud: 0,
           pushed: 1,
+          error: "",
         },
       ],
     });

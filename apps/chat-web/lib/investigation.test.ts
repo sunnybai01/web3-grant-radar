@@ -28,6 +28,7 @@ it("executes the investigation request for a selected event", async () => {
           excerpt: "Applications are open for Base builders.",
         },
       },
+      trajectory: [],
       error: "",
     }),
   };

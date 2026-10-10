@@ -18,14 +18,14 @@ import { shouldRequestTabData } from "./agent-chat";
 
 it("renders dashboard-first workspace", () => {
   const html = renderToString(<AgentChat />);
-  expect(html).toContain("Active Opportunities");
+  // The dashboard is the page itself; the Copilot lives behind a drawer that only
+  // mounts on demand, so no copilot surface appears in the initial render.
+  expect(html).toContain("Opportunity Pipeline");
+  expect(html).toContain("Run Scan");
+  expect(html).toContain("Daily Summary");
   expect(html).toContain("Source Health");
   expect(html).toContain("Schedule Logs");
-  expect(html).toContain("Source Trust");
-  expect(html).toContain("Trust");
-  expect(html).toContain("Run Scan");
-  expect(html).toContain("Send Daily Summary");
-  expect(html).not.toContain("Page Copilot");
+  expect(html).not.toContain("Copilot Chat Mock");
 });
 
 it("removes a deleted opportunity from dashboard state", () => {
@@ -42,6 +42,7 @@ it("removes a deleted opportunity from dashboard state", () => {
     source_trust: "official",
     verification_verdict: "verified",
     apply_url: "https://apply.base.org",
+    is_dismissed: false,
   };
   const second = {
     id: 2,
@@ -56,6 +57,7 @@ it("removes a deleted opportunity from dashboard state", () => {
     source_trust: "official",
     verification_verdict: "verified",
     apply_url: "https://sui.io/overflow",
+    is_dismissed: false,
   };
 
   const result = removeOpportunityFromState(
@@ -93,6 +95,7 @@ it("keeps the current selection when deleting a different row", () => {
     source_trust: "official",
     verification_verdict: "verified",
     apply_url: "https://apply.base.org",
+    is_dismissed: false,
   };
   const second = {
     id: 2,
@@ -107,6 +110,7 @@ it("keeps the current selection when deleting a different row", () => {
     source_trust: "official",
     verification_verdict: "verified",
     apply_url: "https://sui.io/overflow",
+    is_dismissed: false,
   };
 
   const result = removeOpportunityFromState(

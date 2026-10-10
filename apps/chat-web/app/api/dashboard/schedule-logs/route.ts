@@ -1,19 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
+import { api, handleApiError } from "@/lib/api";
 
 export async function GET(req: NextRequest) {
-  const base = process.env.CHAT_API_BASE_URL;
-  const query = req.nextUrl.searchParams.toString();
-  const response = await fetch(
-    `${base}/api/v1/dashboard/schedule-logs${query ? `?${query}` : ""}`,
-    {
-      method: "GET",
-      headers: {
-        "x-internal-key": process.env.CHAT_API_INTERNAL_KEY || "",
-      },
-      cache: "no-store",
-    }
-  );
-
-  const json = await response.json();
-  return NextResponse.json(json, { status: response.status });
+  try {
+    const query = req.nextUrl.searchParams.toString();
+    const { data, status } = await api.get(
+      `/api/v1/dashboard/schedule-logs${query ? `?${query}` : ""}`
+    );
+    return NextResponse.json(data, { status });
+  } catch (error) {
+    const { data, status } = handleApiError(error);
+    return NextResponse.json(data, { status });
+  }
 }

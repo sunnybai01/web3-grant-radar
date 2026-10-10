@@ -123,12 +123,17 @@ export type DashboardOpportunityItem = {
   source_trust: string;
   verification_verdict: string;
   apply_url: string;
+  is_dismissed: boolean;
 };
 
 export type DashboardOpportunityMetrics = {
   total_shown: number;
   avg_score: number;
   verified_percent: number;
+  /** Events whose verification verdict is "verified". */
+  verified_count?: number;
+  /** Events with verdict "unchecked": no security provider answered for them. */
+  unchecked_count?: number;
   grants: number;
   hackathons: number;
   official: number;
@@ -144,6 +149,12 @@ export type DeleteOpportunityResponse = {
   status: string;
   event_id: number;
   deleted: boolean;
+};
+
+export type DismissEventResponse = {
+  status: string;
+  event_id: number;
+  is_dismissed: boolean;
 };
 
 export type DashboardSourceHealthItem = {

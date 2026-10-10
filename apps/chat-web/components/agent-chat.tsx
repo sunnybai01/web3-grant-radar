@@ -7,7 +7,10 @@ import {
   ChevronRight,
   CircleDashed,
   ExternalLink,
+  Eye,
+  EyeOff,
   MessageSquare,
+  MoreHorizontal,
   RotateCcw,
   SearchCheck,
   ShieldCheck,
@@ -19,7 +22,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { z } from "zod";
 
 import { runMixedModeVerification } from "../lib/actions";
-import { deleteJson, getJson, postJson } from "../lib/chat-api";
+import { localApi } from "../lib/api";
 import {
   getManualScanProgressLabel,
   getScheduleStatusMap,
@@ -32,6 +35,7 @@ import type {
   DashboardOpportunitiesResponse,
   DashboardOpportunityItem,
   DeleteOpportunityResponse,
+  DismissEventResponse,
   DedupResetResponse,
   InvestigationResponse,
   DashboardScheduleLogsResponse,
@@ -50,7 +54,22 @@ import ResultPanels from "./result-panels";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader } from "./ui/card";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "./ui/dropdown-menu";
 import { Select } from "./ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "./ui/table";
 
 type DashboardTab = "opportunities" | "sourceHealth" | "scheduleLogs";
 
@@ -210,6 +229,9 @@ export default function AgentChat() {
   const [manualScanError, setManualScanError] = useState<string | null>(null);
   const [isManualScanStarting, setIsManualScanStarting] = useState(false);
   const [deletingEventId, setDeletingEventId] = useState<number | null>(null);
+  const [dismissingEventId, setDismissingEventId] = useState<number | null>(
+    null
+  );
   const [dailySummaryStatus, setDailySummaryStatus] =
     useState<DailySummaryTriggerResponse | null>(null);
   const [dailySummaryError, setDailySummaryError] = useState<string | null>(
@@ -233,18 +255,19 @@ export default function AgentChat() {
     selectTargets: async (
       body: SelectTargetsRequest
     ): Promise<SelectTargetsResponse> =>
-      postJson("/api/chat/select-targets", body),
+      localApi.post("/api/chat/select-targets", body).then((r) => r.data),
     verify: async (body: {
       target_event_ids: number[];
-    }): Promise<VerifyResponse> => postJson("/api/chat/verify", body),
+    }): Promise<VerifyResponse> =>
+      localApi.post("/api/chat/verify", body).then((r) => r.data),
     proposeOptions: async (
       body: ProposeOptionsRequest
     ): Promise<ProposeOptionsResponse> =>
-      postJson("/api/chat/propose-options", body),
+      localApi.post("/api/chat/propose-options", body).then((r) => r.data),
     investigate: async (body: {
       event_id: number;
     }): Promise<InvestigationResponse> =>
-      postJson("/api/chat/investigate", body),
+      localApi.post("/api/chat/investigate", body).then((r) => r.data),
   };
 
   const currentTarget = useMemo<AnalysisTargetInput>(
@@ -334,9 +357,8 @@ export default function AgentChat() {
     setDashboardError(null);
 
     try {
-      const data = (await getJson(
-        "/api/dashboard/opportunities"
-      )) as DashboardOpportunitiesResponse;
+      const data = (await localApi.get("/api/dashboard/opportunities"))
+        .data as DashboardOpportunitiesResponse;
 
       setDashboardData(data);
       setSelectedOpportunity((previous) => {
@@ -369,9 +391,8 @@ export default function AgentChat() {
     setSourceHealthError(null);
 
     try {
-      const data = (await getJson(
-        "/api/dashboard/source-health"
-      )) as DashboardSourceHealthResponse;
+      const data = (await localApi.get("/api/dashboard/source-health"))
+        .data as DashboardSourceHealthResponse;
       setSourceHealthData(data);
     } catch (error) {
       setSourceHealthError(
@@ -389,9 +410,8 @@ export default function AgentChat() {
     setScheduleLogsError(null);
 
     try {
-      const data = (await getJson(
-        "/api/dashboard/schedule-logs?limit=50"
-      )) as DashboardScheduleLogsResponse;
+      const data = (await localApi.get("/api/dashboard/schedule-logs?limit=50"))
+        .data as DashboardScheduleLogsResponse;
       setScheduleLogsData(data);
     } catch (error) {
       setScheduleLogsError(
@@ -404,9 +424,8 @@ export default function AgentChat() {
 
   async function loadManualScanStatus(refreshOnCompletion = false) {
     try {
-      const data = (await getJson(
-        "/api/dashboard/manual-scan"
-      )) as ManualScanStatusResponse;
+      const data = (await localApi.get("/api/dashboard/manual-scan"))
+        .data as ManualScanStatusResponse;
       setManualScanStatus(data);
       setManualScanError(null);
 
@@ -431,10 +450,8 @@ export default function AgentChat() {
     setManualScanError(null);
 
     try {
-      const data = (await postJson(
-        "/api/dashboard/manual-scan",
-        {}
-      )) as ManualScanStatusResponse;
+      const data = (await localApi.post("/api/dashboard/manual-scan", {}))
+        .data as ManualScanStatusResponse;
       setManualScanStatus(data);
       await loadScheduleLogsData();
     } catch (error) {
@@ -451,10 +468,8 @@ export default function AgentChat() {
     setDailySummaryError(null);
 
     try {
-      const data = (await postJson(
-        "/api/dashboard/daily-summary",
-        {}
-      )) as DailySummaryTriggerResponse;
+      const data = (await localApi.post("/api/dashboard/daily-summary", {}))
+        .data as DailySummaryTriggerResponse;
       setDailySummaryStatus(data);
     } catch (error) {
       setDailySummaryError(
@@ -470,10 +485,8 @@ export default function AgentChat() {
     setTavilyUnlockResult(null);
 
     try {
-      const data = (await postJson(
-        "/api/admin/tavily-unlock",
-        {}
-      )) as TavilyUnlockResponse;
+      const data = (await localApi.post("/api/admin/tavily-unlock", {}))
+        .data as TavilyUnlockResponse;
       showResult(setTavilyUnlockResult, data.message);
     } catch (error) {
       showResult(
@@ -490,10 +503,8 @@ export default function AgentChat() {
     setDedupResetResult(null);
 
     try {
-      const data = (await postJson(
-        "/api/admin/reset-dedup",
-        {}
-      )) as DedupResetResponse;
+      const data = (await localApi.post("/api/admin/reset-dedup", {}))
+        .data as DedupResetResponse;
       showResult(setDedupResetResult, data.message);
     } catch (error) {
       showResult(
@@ -521,9 +532,8 @@ export default function AgentChat() {
     setDashboardError(null);
 
     try {
-      (await deleteJson(
-        `/api/dashboard/opportunities/${item.id}`
-      )) as DeleteOpportunityResponse;
+      (await localApi.delete(`/api/dashboard/opportunities/${item.id}`))
+        .data as DeleteOpportunityResponse;
 
       const nextState = removeOpportunityFromState(
         dashboardData,
@@ -548,6 +558,53 @@ export default function AgentChat() {
     }
 
     await deleteOpportunity(selectedOpportunity);
+  }
+
+  async function dismissOpportunity(item: DashboardOpportunityItem) {
+    if (dismissingEventId !== null) {
+      return;
+    }
+
+    setDismissingEventId(item.id);
+    setDashboardError(null);
+
+    const newDismissed = !item.is_dismissed;
+
+    try {
+      const result = (
+        await localApi.put(
+          `/api/dashboard/opportunities/${item.id}/dismiss?dismissed=${newDismissed}`
+        )
+      ).data as DismissEventResponse;
+
+      // Update dashboardData to reflect new dismissed status
+      setDashboardData((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          items: prev.items.map((it) =>
+            it.id === item.id
+              ? { ...it, is_dismissed: result.is_dismissed }
+              : it
+          ),
+        };
+      });
+
+      // Update selected opportunity if it's the one dismissed/restored
+      if (selectedOpportunity?.id === item.id) {
+        setSelectedOpportunity((prev) =>
+          prev ? { ...prev, is_dismissed: result.is_dismissed } : null
+        );
+      }
+    } catch (error) {
+      setDashboardError(
+        error instanceof Error
+          ? error.message
+          : "Failed to dismiss opportunity."
+      );
+    } finally {
+      setDismissingEventId(null);
+    }
   }
 
   useEffect(() => {
@@ -880,6 +937,11 @@ export default function AgentChat() {
             value={
               dashboardData ? `${dashboardData.metrics.verified_percent}%` : "-"
             }
+            hint={
+              dashboardData?.metrics.unchecked_count
+                ? `${dashboardData.metrics.unchecked_count} unchecked`
+                : undefined
+            }
             variant="success"
             icon={CheckCircle2}
           />
@@ -993,23 +1055,33 @@ export default function AgentChat() {
                   />
                 ) : (
                   <>
-                    <div className="overflow-x-auto rounded-3xl border border-border/70">
-                      <table className="min-w-full divide-y divide-border text-sm">
-                        <thead className="bg-muted/60 text-left text-xs uppercase tracking-[0.18em] text-muted-foreground">
-                          <tr>
-                            <th className="px-4 py-3">Score</th>
-                            <th className="px-4 py-3">Type</th>
-                            <th className="px-4 py-3">Title</th>
-                            <th className="px-4 py-3">Ecosystem</th>
-                            <th className="px-4 py-3">Amount</th>
-                            <th className="px-4 py-3">Deadline</th>
-                            <th className="px-4 py-3">Heat</th>
-                            <th className="px-4 py-3">Trust</th>
-                            <th className="px-4 py-3">Verified</th>
-                            <th className="px-4 py-3">Actions</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-border bg-background/40">
+                    <div className="rounded-xl border border-border">
+                      <Table>
+                        <TableHeader className="bg-muted/60 text-left text-xs uppercase tracking-[0.18em] text-muted-foreground">
+                          <TableRow>
+                            <TableHead className="px-4 py-3">Score</TableHead>
+                            <TableHead className="px-4 py-3">Type</TableHead>
+                            <TableHead className="px-4 py-3">Title</TableHead>
+                            <TableHead className="px-4 py-3 w-[50px]">
+                              Link
+                            </TableHead>
+                            <TableHead className="px-4 py-3">
+                              Ecosystem
+                            </TableHead>
+                            <TableHead className="px-4 py-3">Amount</TableHead>
+                            <TableHead className="px-4 py-3">
+                              Deadline
+                            </TableHead>
+                            <TableHead className="px-4 py-3">Heat</TableHead>
+                            <TableHead className="px-4 py-3">Trust</TableHead>
+                            <TableHead className="px-4 py-3">
+                              Verified
+                            </TableHead>
+                            <TableHead className="px-4 py-3">Status</TableHead>
+                            <TableHead className="px-4 py-3 w-[50px]"></TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
                           {dashboardData.items
                             .filter((item) => {
                               if (
@@ -1028,49 +1100,69 @@ export default function AgentChat() {
                               const isSelected =
                                 item.id === selectedOpportunity?.id;
                               return (
-                                <tr
+                                <TableRow
                                   key={item.id}
+                                  data-state={
+                                    isSelected ? "selected" : undefined
+                                  }
                                   className={`${
                                     isSelected
-                                      ? "bg-primary/8 shadow-[inset_0_0_0_1px_rgba(249,115,22,0.18)] border-l-[3px] border-l-primary"
+                                      ? "bg-primary/10 shadow-[inset_0_0_0_1px_hsl(var(--primary)/0.25)] border-l-[3px] border-l-primary"
                                       : "hover:bg-accent/50 border-l-[3px] border-l-transparent"
-                                  } transition-colors`}
+                                  } ${item.is_dismissed ? "opacity-50" : ""}`}
                                 >
-                                  <td className="px-4 py-3 font-medium text-foreground">
+                                  <TableCell className="px-4 py-3 font-medium text-foreground">
                                     {item.score ?? "-"}
-                                  </td>
-                                  <td className="px-4 py-3 text-muted-foreground">
+                                  </TableCell>
+                                  <TableCell className="px-4 py-3 text-muted-foreground">
                                     {item.type}
-                                  </td>
-                                  <td className="px-4 py-3">
+                                  </TableCell>
+                                  <TableCell className="px-4 py-3">
                                     <button
                                       type="button"
-                                      className="text-left font-medium text-foreground"
+                                      className={`text-left font-medium text-foreground ${item.is_dismissed ? "line-through" : ""}`}
                                       onClick={() =>
                                         setSelectedOpportunity(item)
                                       }
                                     >
                                       {item.title}
                                     </button>
-                                  </td>
-                                  <td className="px-4 py-3 text-muted-foreground">
+                                  </TableCell>
+                                  <TableCell className="px-4 py-3">
+                                    {item.apply_url ? (
+                                      <a
+                                        href={item.apply_url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="inline-flex items-center gap-1 text-muted-foreground hover:text-primary transition-colors"
+                                        title={item.apply_url}
+                                      >
+                                        <ExternalLink className="h-3.5 w-3.5" />
+                                      </a>
+                                    ) : (
+                                      <span className="text-muted-foreground/40">
+                                        —
+                                      </span>
+                                    )}
+                                  </TableCell>
+                                  <TableCell className="px-4 py-3 text-muted-foreground">
                                     {item.ecosystem}
-                                  </td>
-                                  <td className="px-4 py-3 text-muted-foreground">
+                                  </TableCell>
+                                  <TableCell className="px-4 py-3 text-muted-foreground">
                                     {item.amount}
-                                  </td>
-                                  <td className="px-4 py-3 text-muted-foreground">
+                                  </TableCell>
+                                  <TableCell className="px-4 py-3 text-muted-foreground">
                                     {item.deadline}
-                                  </td>
-                                  <td className="px-4 py-3 text-muted-foreground">
+                                  </TableCell>
+                                  <TableCell className="px-4 py-3 text-muted-foreground">
                                     {item.heat}
-                                  </td>
-                                  <td className="px-4 py-3 text-muted-foreground">
+                                  </TableCell>
+                                  <TableCell className="px-4 py-3 text-muted-foreground">
                                     {item.source_trust === "official"
                                       ? "Official"
                                       : "Discovery"}
-                                  </td>
-                                  <td className="px-4 py-3">
+                                  </TableCell>
+                                  <TableCell className="px-4 py-3">
                                     {item.verified ? (
                                       <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100 text-xs font-normal">
                                         Verified
@@ -1083,69 +1175,106 @@ export default function AgentChat() {
                                         Unverified
                                       </Badge>
                                     )}
-                                  </td>
-                                  <td className="px-4 py-3">
-                                    <div className="flex items-center gap-1">
-                                      <button
-                                        type="button"
-                                        aria-label="Ask Copilot"
-                                        title="Ask Copilot"
-                                        className={`inline-flex h-8 w-8 items-center justify-center rounded-full transition-colors ${
-                                          isSelected
-                                            ? "bg-primary text-primary-foreground"
-                                            : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                                        }`}
-                                        onClick={() => {
-                                          setSelectedOpportunity(item);
-                                          setIsCopilotOpen(true);
-                                          window.requestAnimationFrame(() => {
-                                            scrollToRelatedPanel(
-                                              resultsSectionRef.current
-                                            );
-                                          });
-                                        }}
+                                  </TableCell>
+                                  <TableCell className="px-4 py-3">
+                                    {item.is_dismissed ? (
+                                      <Badge className="bg-muted text-muted-foreground hover:bg-muted text-xs font-normal">
+                                        Dismissed
+                                      </Badge>
+                                    ) : (
+                                      <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100 text-xs font-normal">
+                                        Active
+                                      </Badge>
+                                    )}
+                                  </TableCell>
+                                  <TableCell className="px-4 py-3">
+                                    <DropdownMenu>
+                                      <DropdownMenuTrigger asChild>
+                                        <button
+                                          type="button"
+                                          aria-label="Actions"
+                                          className={`inline-flex h-8 w-8 items-center justify-center rounded-full transition-colors ${
+                                            isSelected
+                                              ? "bg-primary text-primary-foreground"
+                                              : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                                          }`}
+                                        >
+                                          <MoreHorizontal className="h-4 w-4" />
+                                        </button>
+                                      </DropdownMenuTrigger>
+                                      <DropdownMenuContent
+                                        align="end"
+                                        className="w-40"
                                       >
-                                        <MessageSquare className="h-4 w-4" />
-                                      </button>
-                                      <button
-                                        type="button"
-                                        aria-label="Verify"
-                                        title="Verify"
-                                        disabled={verifyingEventId === item.id}
-                                        className="inline-flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
-                                        onClick={() => {
-                                          setSelectedOpportunity(item);
-                                          void analyzeTarget({
-                                            event_id: item.id,
-                                          });
-                                          window.requestAnimationFrame(() => {
-                                            scrollToRelatedPanel(
-                                              resultsSectionRef.current
-                                            );
-                                          });
-                                        }}
-                                      >
-                                        <SearchCheck className="h-4 w-4" />
-                                      </button>
-                                      <button
-                                        type="button"
-                                        aria-label="Delete"
-                                        title="Delete"
-                                        disabled={deletingEventId === item.id}
-                                        className="inline-flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-rose-50 hover:text-rose-600 disabled:opacity-50"
-                                        onClick={() =>
-                                          void deleteOpportunity(item)
-                                        }
-                                      >
-                                        <Trash2 className="h-4 w-4" />
-                                      </button>
-                                    </div>
-                                  </td>
-                                </tr>
+                                        <DropdownMenuItem
+                                          onSelect={() => {
+                                            setSelectedOpportunity(item);
+                                            void analyzeTarget({
+                                              event_id: item.id,
+                                            });
+                                            window.requestAnimationFrame(() => {
+                                              scrollToRelatedPanel(
+                                                resultsSectionRef.current
+                                              );
+                                            });
+                                          }}
+                                          disabled={
+                                            verifyingEventId === item.id
+                                          }
+                                        >
+                                          <SearchCheck className="h-4 w-4" />
+                                          Verify
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem
+                                          onSelect={() => {
+                                            setSelectedOpportunity(item);
+                                            setIsCopilotOpen(true);
+                                            window.requestAnimationFrame(() => {
+                                              scrollToRelatedPanel(
+                                                resultsSectionRef.current
+                                              );
+                                            });
+                                          }}
+                                        >
+                                          <MessageSquare className="h-4 w-4" />
+                                          Ask Copilot
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem
+                                          onSelect={() =>
+                                            void dismissOpportunity(item)
+                                          }
+                                          disabled={
+                                            dismissingEventId === item.id
+                                          }
+                                        >
+                                          {item.is_dismissed ? (
+                                            <Eye className="h-4 w-4" />
+                                          ) : (
+                                            <EyeOff className="h-4 w-4" />
+                                          )}
+                                          {item.is_dismissed
+                                            ? "Restore"
+                                            : "Dismiss"}
+                                        </DropdownMenuItem>
+                                        <DropdownMenuSeparator />
+                                        <DropdownMenuItem
+                                          onSelect={() =>
+                                            void deleteOpportunity(item)
+                                          }
+                                          disabled={deletingEventId === item.id}
+                                          className="text-rose-600 focus:text-rose-600"
+                                        >
+                                          <Trash2 className="h-4 w-4" />
+                                          Delete
+                                        </DropdownMenuItem>
+                                      </DropdownMenuContent>
+                                    </DropdownMenu>
+                                  </TableCell>
+                                </TableRow>
                               );
                             })}
-                        </tbody>
-                      </table>
+                        </TableBody>
+                      </Table>
                     </div>
                   </>
                 )}
@@ -1203,7 +1332,7 @@ export default function AgentChat() {
                         icon={XCircle}
                       />
                     </div>
-                    <div className="overflow-x-auto rounded-3xl border border-border/70">
+                    <div className="overflow-x-auto rounded-xl border border-border">
                       <table className="min-w-full divide-y divide-border text-sm">
                         <thead className="bg-muted/60 text-left text-xs uppercase tracking-[0.18em] text-muted-foreground">
                           <tr>
@@ -1302,7 +1431,7 @@ export default function AgentChat() {
                         icon={CircleDashed}
                       />
                     </div>
-                    <div className="overflow-x-auto rounded-3xl border border-border/70">
+                    <div className="overflow-x-auto rounded-xl border border-border">
                       <table className="min-w-full divide-y divide-border text-sm">
                         <thead className="bg-muted/60 text-left text-xs uppercase tracking-[0.18em] text-muted-foreground">
                           <tr>
@@ -1398,11 +1527,13 @@ function SourceStatusBadge({ status }: { status: string }) {
 function MetricCard({
   label,
   value,
+  hint,
   icon: Icon,
   variant = "default",
 }: {
   label: string;
   value: string | number;
+  hint?: string;
   icon?: React.ComponentType<{ className?: string }>;
   variant?: "default" | "success" | "warning" | "danger";
 }) {
@@ -1436,6 +1567,9 @@ function MetricCard({
         <p className="mt-1 text-xl font-semibold tracking-[-0.03em] tabular-nums">
           {value}
         </p>
+        {hint ? (
+          <p className="mt-0.5 text-[11px] text-muted-foreground">{hint}</p>
+        ) : null}
       </CardContent>
     </Card>
   );
@@ -1455,7 +1589,7 @@ function EmptyState({
   onAction?: () => void;
 }) {
   return (
-    <div className="rounded-3xl border border-dashed border-border bg-background/70 p-6 text-sm text-muted-foreground">
+    <div className="rounded-xl border border-dashed border-border bg-background/70 p-6 text-sm text-muted-foreground">
       <div className="flex items-center gap-2 text-foreground">
         {icon}
         <span className="font-medium">{title}</span>

@@ -1,15 +1,12 @@
 import { NextResponse } from "next/server";
+import { api, handleApiError } from "@/lib/api";
 
 export async function GET() {
-  const base = process.env.CHAT_API_BASE_URL;
-  const response = await fetch(`${base}/api/v1/dashboard/source-health`, {
-    method: "GET",
-    headers: {
-      "x-internal-key": process.env.CHAT_API_INTERNAL_KEY || "",
-    },
-    cache: "no-store",
-  });
-
-  const json = await response.json();
-  return NextResponse.json(json, { status: response.status });
+  try {
+    const { data, status } = await api.get("/api/v1/dashboard/source-health");
+    return NextResponse.json(data, { status });
+  } catch (error) {
+    const { data, status } = handleApiError(error);
+    return NextResponse.json(data, { status });
+  }
 }
