@@ -41,7 +41,7 @@
 ```mermaid
 flowchart TD
   A[APScheduler 触发任务\ngrant_hackathon / social_watch] --> B[run_pipeline schedule]
-  B --> C[加载 source 配置\nconfig/sources.yaml\n+ optional approved chains.candidates.yaml]
+  B --> C[加载 source 配置\nconfig/sources.yaml]
   C --> D[build_registry\n按 fetch_method 注册 Fetcher]
   D --> E[抓取前裁剪\n按 schedule 过滤 source\nTavily budget 选择\n冷却/失败 source 跳过]
   E --> F[并行遍历可用 source\nRSS / GitHub Search / Web Scraper / Tavily / Twitter]
@@ -92,8 +92,7 @@ cp .env.example .env
 - 向量库：`CHROMA_HOST` `CHROMA_PORT`
 - LLM：`DEEPSEEK_API_KEY` / `QWEN_API_KEY` / `GEMINI_API_KEY`
 - Slack：`SLACK_BOT_TOKEN` `SLACK_CHANNEL_ID`
-- 搜索：`GITHUB_TOKEN` `TAVILY_API_KEYS` `DEFILLAMA_CHAINS_URL`
-- DefiLlama 候选链开关：`DEFILLAMA_SYNC_ENABLED` `DEFILLAMA_SYNC_CRON` `DEFILLAMA_SYNC_TOP_N`
+- 搜索：`GITHUB_TOKEN` `TAVILY_API_KEYS`
 - Tavily 调度控制：`TAVILY_SUCCESS_COOLDOWN_MINUTES` `TAVILY_MAX_SOURCES_PER_RUN`
 - Twitter：`TWITTER_AUTH_INFO_1` `TWITTER_AUTH_INFO_2` `TWITTER_PASSWORD` `TWITTER_TOTP_SECRET` `TWITTER_COOKIES_FILE`
 - 运行：`LOG_LEVEL` `HEARTBEAT_INTERVAL_MINUTES` `SOCIAL_WATCH_INTERVAL_MINUTES` `TWITTER_FETCH_COUNT`
@@ -109,11 +108,6 @@ cp .env.example .env
 
 - `FAILURE_COOLDOWN_MINUTES=720`：source 进入 `down` 后的基础退避，按连续失败次数指数增长，上限 `FAILURE_COOLDOWN_MAX_MINUTES=10080`
 - `LLM_TIMEOUT_SECONDS=60` / `LLM_MAX_RETRIES=1`：单次 LLM 请求的超时与重试预算（不再使用 SDK 默认的 600s×3）
-
-当前 DefiLlama 链路默认值：
-
-- `DEFILLAMA_SYNC_ENABLED=false`：默认停用候选链同步与动态 Tavily 扩源
-- 仅当显式设置为 `true` 时，`chains.candidates.yaml` 才会参与 runtime source 扩展，并注册 `defillama_candidate_sync` job
 
 注意：修改 `.env` 后，若容器已在运行，需要重建应用容器使新环境生效。
 
@@ -286,38 +280,6 @@ docker compose exec -T postgres psql -U web3agent -d web3agent -c "SELECT source
 - 检查 `TAVILY_SUCCESS_COOLDOWN_MINUTES` 与 `TAVILY_MAX_SOURCES_PER_RUN`
 - 现在 Tavily 不是对每条候选都调用，而是对每个启用的 `tavily_search` source 在预算内执行
 - 若仍需进一步降频，优先调小 `TAVILY_MAX_SOURCES_PER_RUN` 或拉长 `TAVILY_SUCCESS_COOLDOWN_MINUTES`
-
-## 15. DefiLlama Seed Sync
-
-Generate a reviewed candidate chain snapshot from DefiLlama:
-
-```bash
-python scripts/sync_defillama_chains.py --top-n 50
-```
-
-This overwrites `config/chains.candidates.yaml` with the latest reviewed candidate snapshot.
-
-Default endpoint:
-
-```bash
-DEFILLAMA_CHAINS_URL=https://api.llama.fi/v2/chains
-```
-
-Scheduled refresh is disabled in the main agent runtime by default:
-
-```bash
-DEFILLAMA_SYNC_ENABLED=false
-DEFILLAMA_SYNC_CRON="30 6 * * *"
-DEFILLAMA_SYNC_TOP_N=50
-```
-
-The cron is interpreted in the app scheduler timezone (`Asia/Shanghai`).
-
-If you need to roll this path back on, set `DEFILLAMA_SYNC_ENABLED=true` and recreate the app container/process.
-
-This command updates `config/chains.candidates.yaml` only. It does not auto-enable chains in `config/chains.yaml`.
-
-Current importer behavior also filters a small set of obvious non-target chains before review so the candidate file is less noisy. Approved chains in `config/chains.yaml` still pass through unchanged.
 
 ## 16. Chain-Aware Source Metadata
 
