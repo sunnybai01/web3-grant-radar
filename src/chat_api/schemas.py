@@ -132,6 +132,10 @@ class DashboardOpportunityMetrics(BaseModel):
     total_shown: int
     avg_score: float
     verified_percent: int
+    # Coverage split behind verified_percent. Without these the dashboard can only
+    # show "0% verified" and cannot say that nothing was checked at all.
+    verified_count: int = 0
+    unchecked_count: int = 0
     grants: int
     hackathons: int
     official: int

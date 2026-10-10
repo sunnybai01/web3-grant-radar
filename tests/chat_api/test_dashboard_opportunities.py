@@ -106,3 +106,49 @@ def test_dashboard_opportunity_delete_endpoint_removes_event(monkeypatch) -> Non
 
     assert resp.status_code == 200
     assert resp.json() == {"status": "success", "event_id": 101, "deleted": True}
+
+def test_metrics_include_verification_coverage_split(monkeypatch) -> None:
+    """verified_percent alone cannot distinguish "nothing verified" from
+    "nothing checked", so the payload carries both counts."""
+    from src.chat_api import app as chat_app
+    from src.chat_api import dashboard_service
+
+    monkeypatch.setattr(
+        dashboard_service,
+        "list_opportunities",
+        lambda filters: {
+            "metrics": {
+                "total_shown": 2, "avg_score": 6.0, "verified_percent": 50,
+                "verified_count": 1, "unchecked_count": 1,
+                "grants": 2, "hackathons": 0, "official": 1, "discovery": 1,
+            },
+            "items": [],
+        },
+    )
+
+    payload = chat_app.dashboard_opportunities()
+
+    assert payload.metrics.verified_count == 1
+    assert payload.metrics.unchecked_count == 1
+
+
+def test_metrics_default_the_coverage_split_when_absent(monkeypatch) -> None:
+    from src.chat_api import app as chat_app
+    from src.chat_api import dashboard_service
+
+    monkeypatch.setattr(
+        dashboard_service,
+        "list_opportunities",
+        lambda filters: {
+            "metrics": {
+                "total_shown": 0, "avg_score": 0.0, "verified_percent": 0,
+                "grants": 0, "hackathons": 0, "official": 0, "discovery": 0,
+            },
+            "items": [],
+        },
+    )
+
+    payload = chat_app.dashboard_opportunities()
+
+    assert payload.metrics.verified_count == 0
+    assert payload.metrics.unchecked_count == 0
