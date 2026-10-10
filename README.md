@@ -14,7 +14,7 @@ Web3 Grant Radar continuously watches ecosystem feeds, websites, search and X/Tw
 - **Zero-trust verification**: origin anchoring, GitHub/domain cross-referencing and security APIs (GoPlus / CertiK / ScamSniffer); events judged as fraud are dropped
 - **Scoring**: ROI, reputation, timeliness and strategic fit
 - **Delivery**: Slack Block Kit cards, per-run Markdown reports, a daily summary and heartbeats
-- **Grant Radar web**: a Next.js dashboard (`apps/chat-web`) with opportunities, source health, schedule logs, manual scans and a read-only verification copilot
+- **Grant Radar web**: a Next.js dashboard (`apps/chat-web`) for daily triage: shortlist or dismiss each opportunity, verify it, and ask a read-only copilot about it
 
 ## Architecture
 
@@ -130,13 +130,13 @@ Bounties are out of scope: the `bounty` schedule is not registered, and the clas
 
 ## Grant Radar web
 
-`apps/chat-web` is a Next.js app backed by `chat-api`:
+`apps/chat-web` is a Next.js app backed by `chat-api`, with two pages:
 
-- Dashboard: opportunities (filter, dismiss, delete), source health, schedule logs, daily summary
-- Actions: manual scan, Tavily unlock, dedup reset
-- Copilot: a read-only assistant that answers from database tools: target selection, verification, investigation and build proposals
+- **Triage** (`/`): the opportunity list on the left, the selected opportunity on the right. Each opportunity is *New*, *Shortlisted* or *Dismissed*; the decision is stored in `events.triage_status` and shared by the whole team. Search, filters, sorting and the selection live in the URL, so a link opens the same view. Keyboard: `J`/`K` move, `S` shortlist, `D` dismiss, `Z` undo, `O` open the apply page, `/` search.
+- **Operations** (`/operations`): manual scan, source health (problems first), recent runs, and maintenance actions (send the daily summary, unlock Tavily sources, reset the dedup index).
+- **Detail tabs**: *Overview* (summary, score breakdown, sources), *Verification* (trust score, evidence, similar past events, ways to take part; runs on request) and *Ask Copilot* (a read-only assistant that answers from database tools).
 
-The backend routes live under `/api/v1/dashboard/*`, `/api/v1/chat/*` and `/api/v1/admin/*` (see `src/chat_api/app.py`). Every route except `chat/health` requires the `X-Internal-Key` header. The frontend can be deployed to Vercel with the same `CHAT_API_*` variables. Give `chat-api` read-only database credentials and keep them separate from the pipeline's.
+The backend routes live under `/api/v1/dashboard/*`, `/api/v1/chat/*` and `/api/v1/admin/*` (see `src/chat_api/app.py`). Every route except `chat/health` requires the `X-Internal-Key` header. The frontend can be deployed to Vercel with the same `CHAT_API_*` variables. `chat-api` writes triage decisions and deletions, so it needs write access to `events`; keep its credentials separate from the pipeline's.
 
 ## Project layout
 

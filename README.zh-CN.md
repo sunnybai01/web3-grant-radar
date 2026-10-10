@@ -14,7 +14,7 @@ Web3 Grant Radar（Web3 资助雷达）持续监控各生态的公告源、官�
 - **零信任校验**：来源锚定、GitHub 与域名交叉验证、安全 API（GoPlus / CertiK / ScamSniffer）；被判定为欺诈的事件直接丢弃
 - **机会评分**：从 ROI、声誉、时效性和战略契合度四个维度打分
 - **消息分发**：Slack Block Kit 卡片、每轮 Markdown 报告、每日汇总和心跳
-- **Grant Radar Web**：Next.js 面板（`apps/chat-web`），可查看机会列表、信息源健康度和调度日志，支持手动扫描，并内置只读校验 Copilot
+- **Grant Radar Web**：Next.js 面板（`apps/chat-web`），用于每天筛选机会：逐条决定跟进或忽略、做校验，也可以向只读 Copilot 提问
 
 ## 系统架构
 
@@ -130,13 +130,13 @@ Bounty 不在系统范围内：`bounty` 调度不会注册，分类器也会把 
 
 ## Grant Radar Web
 
-`apps/chat-web` 是一个 Next.js 应用，后端是 `chat-api`：
+`apps/chat-web` 是一个 Next.js 应用，后端是 `chat-api`，包含两个页面：
 
-- 面板：机会列表（支持筛选、忽略、删除）、信息源健康度、调度日志、每日汇总
-- 操作：手动扫描、解除 Tavily 锁、重置去重
-- Copilot：只读助手，所有回答都基于数据库工具，包括目标筛选、可靠性校验、深入调查和参与方案建议
+- **机会处理页**（`/`）：左边是机会列表，右边是当前选中机会的详情。每条机会处于 *New*（待处理）、*Shortlisted*（跟进）或 *Dismissed*（忽略）三种状态之一，状态存在 `events.triage_status` 字段里，整个团队共享。搜索、筛选、排序和当前选中项都记录在 URL 里，把链接发给同事就能打开同一个视图。快捷键：`J`/`K` 上下移动，`S` 跟进，`D` 忽略，`Z` 撤销，`O` 打开申请页，`/` 搜索。
+- **运维页**（`/operations`）：手动扫描、信息源健康度（默认只列出有问题的源）、最近运行记录，以及维护操作（立即发送日报、解除 Tavily 锁、重置去重索引）。
+- **详情标签页**：*Overview*（简介、分项评分、来源）、*Verification*（可信度评分、证据、相似历史事件、参与方式；点击后才运行）、*Ask Copilot*（只读助手，回答都基于数据库工具）。
 
-后端接口分布在 `/api/v1/dashboard/*`、`/api/v1/chat/*` 和 `/api/v1/admin/*` 下（见 `src/chat_api/app.py`）。除 `chat/health` 外，其他接口都需要带 `X-Internal-Key` 请求头。前端可以部署到 Vercel，配置同样的 `CHAT_API_*` 变量即可。`chat-api` 应使用只读数据库凭据，并与 pipeline 的凭据分开。
+后端接口分布在 `/api/v1/dashboard/*`、`/api/v1/chat/*` 和 `/api/v1/admin/*` 下（见 `src/chat_api/app.py`）。除 `chat/health` 外，其他接口都需要带 `X-Internal-Key` 请求头。前端可以部署到 Vercel，配置同样的 `CHAT_API_*` 变量即可。`chat-api` 会写入处理状态和删除记录，因此需要 `events` 表的写权限；它的凭据应与 pipeline 分开。
 
 ## 目录结构
 
