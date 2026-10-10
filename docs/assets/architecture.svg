@@ -1,0 +1,169 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1080" viewBox="0 0 1600 1080" role="img" aria-labelledby="title desc">
+  <title id="title">Web3 Grant Radar system architecture</title>
+  <desc id="desc">A high-level architecture showing opportunity sources feeding a Python pipeline, which uses language models and security providers, persists data to PostgreSQL and ChromaDB, and powers a Next.js dashboard through a FastAPI chat API.</desc>
+  <defs>
+    <linearGradient id="header" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#101a33"/><stop offset="1" stop-color="#172c4f"/></linearGradient>
+    <linearGradient id="pipe" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#eef2ff"/><stop offset="1" stop-color="#f6f4ff"/></linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%"><feDropShadow dx="0" dy="5" stdDeviation="8" flood-color="#183153" flood-opacity="0.08"/></filter>
+    <marker id="arrowBlue" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#6481ad"/></marker>
+    <marker id="arrowTeal" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#168c84"/></marker>
+    <marker id="arrowPurple" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#7b61c9"/></marker>
+    <style>
+      text{font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;fill:#1b2940}
+      .eyebrow{font-size:13px;font-weight:700;letter-spacing:2px;fill:#8fa4c8}
+      .headerTitle{font-size:36px;font-weight:750;fill:#fff;letter-spacing:-.7px}
+      .headerSub{font-size:16px;fill:#cad6ea}
+      .section{font-size:16px;font-weight:750;letter-spacing:1.3px;fill:#293b59}
+      .sectionNo{fill:#168c84}
+      .panel{fill:#fff;stroke:#e1e8f2;stroke-width:1.4}
+      .panelTitle{font-size:19px;font-weight:750;fill:#1b2940}
+      .sub{font-size:13.5px;fill:#61708b}
+      .small{font-size:14px;fill:#34445e}
+      .tiny{font-size:12.5px;fill:#61708b}
+      .stepTitle{font-size:14px;font-weight:700;fill:#293b59}
+      .stepBody{font-size:12.5px;fill:#61708b}
+      .pill{font-size:12px;font-weight:700;fill:#35516f}
+      .line{fill:none;stroke:#6481ad;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round;marker-end:url(#arrowBlue)}
+      .lineTeal{fill:none;stroke:#168c84;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round;marker-end:url(#arrowTeal)}
+      .linePurple{fill:none;stroke:#7b61c9;stroke-width:2.2;stroke-dasharray:6 6;stroke-linecap:round;stroke-linejoin:round;marker-end:url(#arrowPurple)}
+    </style>
+  </defs>
+  <rect width="1600" height="1080" fill="#f4f7fb"/>
+  <rect width="1600" height="150" fill="url(#header)"/>
+  <circle cx="1470" cy="10" r="190" fill="#244776" opacity=".26"/>
+  <circle cx="1510" cy="110" r="112" fill="#168c84" opacity=".12"/>
+  <text x="64" y="35" class="eyebrow">OPEN SOURCE · WEB3 OPPORTUNITY INTELLIGENCE</text>
+  <text x="64" y="82" class="headerTitle">Web3 Grant Radar</text>
+  <text x="64" y="116" class="headerSub">Discover → deduplicate → verify → score → deliver — with an auditable data trail.</text>
+  <rect x="1290" y="48" width="245" height="42" rx="21" fill="#253d61" stroke="#49658c"/>
+  <circle cx="1314" cy="69" r="5" fill="#53dbc1"/>
+  <text x="1330" y="74" font-size="12.5" font-weight="700" letter-spacing="1.1" fill="#e5eefb">SYSTEM ARCHITECTURE</text>
+
+  <text x="64" y="194" class="section"><tspan class="sectionNo">01</tspan><tspan dx="12">OPPORTUNITY DISCOVERY PIPELINE</tspan></text>
+  <text x="64" y="218" class="sub">The scheduled worker is the data-processing backbone; providers are called only for the relevant stage.</text>
+
+  <!-- Main row panels -->
+  <rect x="56" y="240" width="276" height="365" rx="18" class="panel" filter="url(#shadow)"/>
+  <rect x="56" y="240" width="276" height="7" rx="3.5" fill="#168c84"/>
+  <text x="80" y="282" class="panelTitle">Signal sources</text>
+  <text x="80" y="305" class="sub">Configured in config/sources.yaml</text>
+  <g>
+    <rect x="78" y="327" width="232" height="42" rx="10" fill="#eef9f7" stroke="#d4eeea"/><circle cx="96" cy="348" r="4" fill="#168c84"/><text x="110" y="353" class="small">RSS &amp; official websites</text>
+    <rect x="78" y="379" width="232" height="42" rx="10" fill="#eef9f7" stroke="#d4eeea"/><circle cx="96" cy="400" r="4" fill="#168c84"/><text x="110" y="405" class="small">Web scraping</text>
+    <rect x="78" y="431" width="232" height="42" rx="10" fill="#eef9f7" stroke="#d4eeea"/><circle cx="96" cy="452" r="4" fill="#168c84"/><text x="110" y="457" class="small">Tavily search</text>
+    <rect x="78" y="483" width="232" height="42" rx="10" fill="#eef9f7" stroke="#d4eeea"/><circle cx="96" cy="504" r="4" fill="#168c84"/><text x="110" y="509" class="small">GitHub issue search</text>
+    <rect x="78" y="535" width="232" height="42" rx="10" fill="#eef9f7" stroke="#d4eeea"/><circle cx="96" cy="556" r="4" fill="#168c84"/><text x="110" y="561" class="small">X / Twitter (Twikit)</text>
+  </g>
+
+  <rect x="365" y="240" width="664" height="365" rx="18" fill="url(#pipe)" stroke="#dcdff7" stroke-width="1.5" filter="url(#shadow)"/>
+  <rect x="365" y="240" width="664" height="7" rx="3.5" fill="#7b61c9"/>
+  <text x="391" y="282" class="panelTitle">Python pipeline</text>
+  <text x="391" y="305" class="sub">APScheduler · python -m src.main · parallel fetchers</text>
+  <rect x="823" y="261" width="180" height="28" rx="14" fill="#e7e2fb"/><text x="913" y="279" text-anchor="middle" class="pill">grant_hackathon · social_watch</text>
+  <g>
+    <rect x="390" y="326" width="294" height="70" rx="12" fill="#fff" stroke="#e5e7f6"/>
+    <rect x="390" y="326" width="5" height="70" rx="2.5" fill="#7b61c9"/>
+    <circle cx="416" cy="350" r="13" fill="#eeeafd"/><text x="416" y="355" text-anchor="middle" font-size="12" font-weight="800" fill="#6247b1">1</text>
+    <text x="438" y="351" class="stepTitle">Fetch &amp; normalize</text><text x="438" y="374" class="stepBody">Parallel fetch · source health</text>
+
+    <rect x="700" y="326" width="304" height="70" rx="12" fill="#fff" stroke="#e5e7f6"/>
+    <rect x="700" y="326" width="5" height="70" rx="2.5" fill="#7b61c9"/>
+    <circle cx="726" cy="350" r="13" fill="#eeeafd"/><text x="726" y="355" text-anchor="middle" font-size="12" font-weight="800" fill="#6247b1">2</text>
+    <text x="748" y="351" class="stepTitle">L1 canonical URL dedup</text><text x="748" y="374" class="stepBody">Remove repeated links early</text>
+
+    <rect x="390" y="409" width="294" height="70" rx="12" fill="#fff" stroke="#e5e7f6"/>
+    <rect x="390" y="409" width="5" height="70" rx="2.5" fill="#7b61c9"/>
+    <circle cx="416" cy="433" r="13" fill="#eeeafd"/><text x="416" y="438" text-anchor="middle" font-size="12" font-weight="800" fill="#6247b1">3</text>
+    <text x="438" y="434" class="stepTitle">Classify &amp; apply gates</text><text x="438" y="457" class="stepBody">Keywords + LLM · stage / reward / age</text>
+
+    <rect x="700" y="409" width="304" height="70" rx="12" fill="#fff" stroke="#e5e7f6"/>
+    <rect x="700" y="409" width="5" height="70" rx="2.5" fill="#7b61c9"/>
+    <circle cx="726" cy="433" r="13" fill="#eeeafd"/><text x="726" y="438" text-anchor="middle" font-size="12" font-weight="800" fill="#6247b1">4</text>
+    <text x="748" y="434" class="stepTitle">L2 semantic dedup</text><text x="748" y="457" class="stepBody">Embeddings + deadline / ecosystem vetoes</text>
+
+    <rect x="390" y="492" width="294" height="70" rx="12" fill="#fff" stroke="#e5e7f6"/>
+    <rect x="390" y="492" width="5" height="70" rx="2.5" fill="#7b61c9"/>
+    <circle cx="416" cy="516" r="13" fill="#eeeafd"/><text x="416" y="521" text-anchor="middle" font-size="12" font-weight="800" fill="#6247b1">5</text>
+    <text x="438" y="517" class="stepTitle">Verify &amp; score</text><text x="438" y="540" class="stepBody">Provenance, security, ROI and fit</text>
+
+    <rect x="700" y="492" width="304" height="70" rx="12" fill="#fff" stroke="#e5e7f6"/>
+    <rect x="700" y="492" width="5" height="70" rx="2.5" fill="#168c84"/>
+    <circle cx="726" cy="516" r="13" fill="#def5f0"/><text x="726" y="521" text-anchor="middle" font-size="12" font-weight="800" fill="#11776f">6</text>
+    <text x="748" y="517" class="stepTitle">Persist &amp; deliver</text><text x="748" y="540" class="stepBody">Postgres · qualified events to Slack</text>
+  </g>
+
+  <rect x="1062" y="240" width="482" height="365" rx="18" class="panel" filter="url(#shadow)"/>
+  <rect x="1062" y="240" width="482" height="7" rx="3.5" fill="#df9851"/>
+  <text x="1088" y="282" class="panelTitle">External integrations</text>
+  <text x="1088" y="305" class="sub">Providers are accessed by the pipeline as needed.</text>
+  <rect x="1088" y="327" width="430" height="78" rx="12" fill="#fff8ef" stroke="#f2dfc8"/>
+  <rect x="1088" y="327" width="5" height="78" rx="2.5" fill="#df9851"/>
+  <text x="1110" y="353" class="stepTitle">LLM providers</text><text x="1110" y="376" class="small">DeepSeek · Qwen · Gemini</text><text x="1110" y="393" class="tiny">Priority-based fallback</text>
+  <rect x="1088" y="418" width="430" height="78" rx="12" fill="#fff8ef" stroke="#f2dfc8"/>
+  <rect x="1088" y="418" width="5" height="78" rx="2.5" fill="#df9851"/>
+  <text x="1110" y="444" class="stepTitle">Trust &amp; risk APIs</text><text x="1110" y="467" class="small">GoPlus · CertiK · ScamSniffer</text><text x="1110" y="484" class="tiny">Alongside domain / GitHub cross-checks</text>
+  <rect x="1088" y="509" width="430" height="70" rx="12" fill="#eef9f7" stroke="#d4eeea"/>
+  <rect x="1088" y="509" width="5" height="70" rx="2.5" fill="#168c84"/>
+  <text x="1110" y="535" class="stepTitle">Slack delivery</text><text x="1110" y="558" class="small">Opportunity cards · run reports · daily summary</text>
+
+  <!-- main row arrows -->
+  <path d="M332 422 H357" class="lineTeal"/>
+  <path d="M1029 422 H1050" class="line"/>
+  <path d="M1029 530 H1045 V544 H1080" class="lineTeal"/>
+
+  <!-- data and UI lane -->
+  <text x="64" y="657" class="section"><tspan class="sectionNo">02</tspan><tspan dx="12">DASHBOARD, DATA &amp; RUNTIME</tspan></text>
+  <text x="64" y="681" class="sub">The dashboard is a separate web app; the API reads opportunity data and writes only triage decisions.</text>
+
+  <rect x="56" y="705" width="300" height="222" rx="18" class="panel" filter="url(#shadow)"/>
+  <rect x="56" y="705" width="7" height="222" rx="3.5" fill="#3d8bd9"/>
+  <text x="82" y="746" class="panelTitle">Next.js dashboard</text>
+  <rect x="82" y="763" width="95" height="24" rx="12" fill="#e8f2fd"/><text x="129" y="779" text-anchor="middle" class="pill">apps/chat-web</text>
+  <text x="82" y="817" class="small">• Triage: shortlist / dismiss</text>
+  <text x="82" y="841" class="small">• Source health &amp; schedule logs</text>
+  <text x="82" y="865" class="small">• Operations: scans, sources, runs</text>
+  <text x="82" y="889" class="small">• Verification + read-only Copilot</text>
+
+  <rect x="402" y="705" width="300" height="222" rx="18" class="panel" filter="url(#shadow)"/>
+  <rect x="402" y="705" width="7" height="222" rx="3.5" fill="#3d8bd9"/>
+  <text x="428" y="746" class="panelTitle">FastAPI chat-api</text>
+  <rect x="428" y="763" width="150" height="24" rx="12" fill="#e8f2fd"/><text x="503" y="779" text-anchor="middle" class="pill">127.0.0.1:8000</text>
+  <text x="428" y="817" class="small">• /api/v1/dashboard/*</text>
+  <text x="428" y="841" class="small">• /api/v1/chat/*</text>
+  <text x="428" y="865" class="small">• /api/v1/admin/*</text>
+  <text x="428" y="889" class="tiny">X-Internal-Key required (except chat/health)</text>
+
+  <rect x="748" y="705" width="430" height="222" rx="18" class="panel" filter="url(#shadow)"/>
+  <rect x="748" y="705" width="7" height="222" rx="3.5" fill="#168c84"/>
+  <text x="774" y="746" class="panelTitle">Persistence layer</text>
+  <rect x="774" y="767" width="378" height="62" rx="11" fill="#eef9f7" stroke="#d4eeea"/>
+  <text x="793" y="791" class="stepTitle">PostgreSQL</text><text x="793" y="812" class="stepBody">Events · raw signals · source health · logs</text>
+  <rect x="774" y="843" width="378" height="62" rx="11" fill="#f0edfc" stroke="#ded8f8"/>
+  <text x="793" y="867" class="stepTitle">ChromaDB</text><text x="793" y="888" class="stepBody">Vector index used for L2 semantic dedup</text>
+
+  <rect x="1224" y="705" width="320" height="222" rx="18" class="panel" filter="url(#shadow)"/>
+  <rect x="1224" y="705" width="7" height="222" rx="3.5" fill="#df9851"/>
+  <text x="1250" y="746" class="panelTitle">Runtime &amp; deployment</text>
+  <text x="1250" y="780" class="stepTitle">Docker Compose</text>
+  <text x="1250" y="802" class="small">pipeline · chat-api</text>
+  <text x="1250" y="824" class="small">postgres · chromadb</text>
+  <line x1="1250" y1="842" x2="1510" y2="842" stroke="#e1e8f2"/>
+  <text x="1250" y="866" class="stepTitle">Web frontend runs separately</text>
+  <text x="1250" y="888" class="small">Local pnpm dev or Vercel</text>
+  <text x="1250" y="910" class="tiny">Keep API / database credentials scoped</text>
+
+  <!-- control-plane connectors -->
+  <path d="M356 816 H394" class="line"/>
+  <path d="M702 816 H726 V798 H766" class="line"/>
+  <path d="M995 605 V697" class="lineTeal"/>
+  <rect x="1006" y="626" width="120" height="23" rx="11.5" fill="#dff5f0" stroke="#bce8df"/><text x="1066" y="642" text-anchor="middle" font-size="11.5" font-weight="700" fill="#11776f">persist / index</text>
+  <path d="M552 705 V690 H348 V610 H425 V571" class="linePurple"/>
+  <rect x="355" y="623" width="137" height="23" rx="11.5" fill="#eeeafd" stroke="#dcd4fa"/><text x="423" y="639" text-anchor="middle" font-size="11.5" font-weight="700" fill="#6247b1">manual scan / ops</text>
+
+  <text x="64" y="982" font-size="12.5" fill="#71819a">Design notes</text>
+  <line x1="64" y1="997" x2="1536" y2="997" stroke="#dfe6f0"/>
+  <circle cx="75" cy="1023" r="4" fill="#168c84"/><text x="89" y="1028" class="tiny">Official sources receive a trust uplift during verification.</text>
+  <circle cx="573" cy="1023" r="4" fill="#7b61c9"/><text x="587" y="1028" class="tiny">L2 duplicates merge into an event; new candidates continue to verification.</text>
+  <circle cx="1092" cy="1023" r="4" fill="#df9851"/><text x="1106" y="1028" class="tiny">Copilot is read-only; keep chat-api DB credentials separate.</text>
+  <text x="64" y="1057" font-size="11.5" fill="#94a1b5">Architecture based on the current README and documented runtime topology. Internal pipeline stages are grouped for readability.</text>
+</svg>

@@ -70,7 +70,12 @@ class Event(Base):
     slack_ts = Column(String(64), nullable=True)
     slack_channel_id = Column(String(32), nullable=True)
 
-    # Manual dismissal — operator marks opportunity as not matching
+    # Dashboard triage decision: new | shortlisted | dismissed. This is the source
+    # of truth for "dismissed"; is_dismissed is kept in sync for rollback only.
+    triage_status = Column(String(16), nullable=False, default="new", server_default="new", index=True)
+    triaged_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Legacy dismissal flag — written alongside triage_status, no longer read.
     is_dismissed = Column(Boolean, default=False, index=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())

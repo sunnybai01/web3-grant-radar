@@ -146,7 +146,7 @@ def test_build_daily_summary_excludes_dismissed_events_from_every_section() -> N
             ecosystem="base",
             final_score=9.5,
             created_at=datetime.datetime(2026, 7, 6, 5, 0),
-            is_dismissed=True,
+            triage_status="dismissed",
         )
         dismissed_older = Event(
             event_type="hackathon",
@@ -154,7 +154,7 @@ def test_build_daily_summary_excludes_dismissed_events_from_every_section() -> N
             ecosystem="arbitrum",
             final_score=9.9,
             created_at=datetime.datetime(2026, 7, 1, 4, 0),
-            is_dismissed=True,
+            triage_status="dismissed",
         )
         db.add_all([kept, dismissed_today, dismissed_older])
         db.commit()
@@ -174,29 +174,27 @@ def test_build_daily_summary_excludes_dismissed_events_from_every_section() -> N
         db.close()
 
 
-def test_build_daily_summary_treats_null_is_dismissed_as_not_dismissed() -> None:
-    """is_dismissed is nullable; rows predating the column must stay visible."""
+def test_build_daily_summary_keeps_new_and_shortlisted_events() -> None:
+    """Only a dismissal hides an event; shortlisting must not drop it from Slack."""
     db = _db_session()
     try:
         summary_date = datetime.date(2026, 7, 6)
+        when = datetime.datetime(2026, 7, 6, 4, 0)
 
-        legacy = Event(
-            event_type="grant",
-            title="Legacy Unflagged Event",
-            ecosystem="base",
-            final_score=7.0,
-            created_at=datetime.datetime(2026, 7, 6, 4, 0),
-            is_dismissed=None,
-        )
-        db.add(legacy)
+        db.add_all([
+            Event(event_type="grant", title="Untriaged Event", ecosystem="base",
+                  final_score=7.0, created_at=when),
+            Event(event_type="grant", title="Shortlisted Event", ecosystem="base",
+                  final_score=6.0, created_at=when, triage_status="shortlisted"),
+        ])
         db.commit()
 
         payload = build_daily_summary(db, summary_date=summary_date)
 
-        assert [event["title"] for event in payload["new_events"]] == ["Legacy Unflagged Event"]
-        assert [
-            event["title"] for event in payload["historical_high_score"]["recent_events"]
-        ] == ["Legacy Unflagged Event"]
+        assert sorted(event["title"] for event in payload["new_events"]) == [
+            "Shortlisted Event",
+            "Untriaged Event",
+        ]
     finally:
         db.close()
 
@@ -256,7 +254,7 @@ def test_fraud_and_expired_events_are_excluded_from_the_summary() -> None:
             Event(event_type="hackathon", title="Long Gone Hackathon", status="expired", created_at=when),
             Event(event_type="grant", title="Archived Grant", status="archived", created_at=when),
             Event(event_type="grant", title="Dismissed Grant", status="new",
-                  is_dismissed=True, created_at=when),
+                  triage_status="dismissed", created_at=when),
         ])
         db.commit()
 

@@ -2,159 +2,198 @@
 
 [English](README.md) | **简体中文**
 
-> 追踪 Web3 资助（Grants）与黑客松（Hackathons）机会：去重、校验、评分，一站完成。
+> 追踪 Web3 资助（Grants）与黑客松（Hackathons）机会：发现、去重、校验、评分，一站完成。
 
-Web3 Grant Radar（Web3 资助雷达）持续监控各生态的公告源、官网、搜索结果和 X/Twitter，从中发现资助计划和黑客松。每条候选信息都要经过去重、LLM 分类、零信任校验和评分，最终留下来的有效机会会推送到 Slack，并汇总到 Web 面板。面板里有一个只读 Copilot，可以帮助团队深入分析每个机会。
+![Python 流水线](https://img.shields.io/badge/Pipeline-Python-3776AB?logo=python&logoColor=white)
+![API](https://img.shields.io/badge/API-FastAPI-009688?logo=fastapi&logoColor=white)
+![Web](https://img.shields.io/badge/Web-Next.js-111111?logo=nextdotjs&logoColor=white)
+![部署](https://img.shields.io/badge/Deployment-Docker%20Compose-2496ED?logo=docker&logoColor=white)
+
+Web3 Grant Radar 持续监控各生态公告源、项目官网、Tavily 搜索结果和 X/Twitter，发现资助计划与黑客松机会。候选信息会经过多层去重、LLM 分类、零信任校验和评分。符合条件的机会会保存到数据库、推送到 Slack，并进入 Web 面板，由团队逐条决定跟进或忽略；面板还内置一个只读 Copilot，帮助团队进一步分析机会。
+
+## 目录
+
+- [功能特性](#功能特性)
+- [系统架构](#系统架构)
+- [机会处理流程](#机会处理流程)
+- [快速开始](#快速开始)
+- [配置](#配置)
+- [信息源](#信息源)
+- [调度策略](#调度策略asiashanghai)
+- [Slack 推送](#slack-推送)
+- [Grant Radar Web](#grant-radar-web)
+- [目录结构](#目录结构)
+- [开发](#开发)
+- [运维](#运维)
 
 ## 功能特性
 
-- **多源抓取**：支持 RSS、网页抓取、Tavily 搜索、GitHub Issue 搜索和 X/Twitter（Twikit），统一在 `config/sources.yaml` 中配置
-- **双层去重**：L1 按规范化 URL 去重；L2 做语义去重（基于 ChromaDB 向量，并用截止日期和生态做否决判断）
-- **分类与过滤**：先做关键词粗筛，再交给 LLM 分类（DeepSeek / Qwen / Gemini，按优先级降级）；之后还要经过可申请状态、最低奖金和时效三道过滤
-- **零信任校验**：来源锚定、GitHub 与域名交叉验证、安全 API（GoPlus / CertiK / ScamSniffer）；被判定为欺诈的事件直接丢弃
-- **机会评分**：从 ROI、声誉、时效性和战略契合度四个维度打分
-- **消息分发**：Slack Block Kit 卡片、每轮 Markdown 报告、每日汇总和心跳
-- **Grant Radar Web**：Next.js 面板（`apps/chat-web`），可查看机会列表、信息源健康度和调度日志，支持手动扫描，并内置只读校验 Copilot
+- **多源发现**：支持 RSS、网页抓取、Tavily 搜索和 X/Twitter（Twikit），统一在 `config/sources.yaml` 中配置。代码里也提供 GitHub Issue 搜索抓取器，但默认没有配置 GitHub 信息源。
+- **双层去重**：L1 根据规范化 URL 去重；L2 使用 ChromaDB 向量语义去重，并结合截止日期、生态信息进行否决判断。
+- **LLM 辅助分类**：先进行关键词粗筛，再调用 DeepSeek / Qwen / Gemini 分类，并按优先级降级。
+- **质量门控**：过滤不可执行、低于最低奖励金额或信息过期的机会。
+- **零信任校验**：来源锚定、GitHub 与域名交叉验证，并接入 GoPlus / CertiK / ScamSniffer 安全 API；判定为欺诈的项目会终止处理。
+- **机会评分**：综合 ROI、声誉、时效性和战略契合度。
+- **Slack 推送**：Block Kit 卡片、单轮 Markdown 报告和每日汇总。
+- **机会处理面板**：`apps/chat-web` 列出新机会，由团队逐条决定跟进或忽略；支持按需校验、只读 Copilot，另有运维页查看扫描、信息源健康度和运行日志。
 
 ## 系统架构
 
-| 服务（`docker compose`） | 容器名 | 职责 |
+系统将定时发现流水线与面板/API 请求分离：pipeline 负责发现和处理机会；`chat-api` 为面板提供接口，只会写入处理状态和删除记录，应为它配置独立的数据库凭据。
+
+![Web3 Grant Radar 系统架构图](docs/assets/architecture.svg)
+
+> `docs/architecture.mmd` 以可编辑的 Mermaid 形式维护相同的组件与连接关系；由于 Mermaid 会独立计算布局，排列方式不会与 SVG 逐像素相同。
+
+### 运行服务
+
+| Docker Compose 服务 | 容器名 | 职责 |
 |---|---|---|
-| `pipeline` | `grant_radar_pipeline` | 调度器，负责从抓取到分发的完整链路（`python -m src.main`） |
-| `chat-api` | `grant_radar_chat_api` | FastAPI 后端，为面板和 Copilot 提供接口，监听 `127.0.0.1:8000` |
-| `postgres` | `grant_radar_postgres` | 业务数据（事件、原始信号、信息源健康度、日志） |
-| `chromadb` | `grant_radar_chromadb` | L2 语义去重使用的向量索引，监听 `127.0.0.1:8001` |
+| `pipeline` | `grant_radar_pipeline` | 调度及从抓取到分发的完整链路，入口为 `python -m src.main` |
+| `chat-api` | `grant_radar_chat_api` | 面板和 Copilot 使用的 FastAPI 后端，监听 `127.0.0.1:8000` |
+| `postgres` | `grant_radar_postgres` | 保存事件、原始信号、信息源健康度和运行日志 |
+| `chromadb` | `grant_radar_chromadb` | L2 语义去重的向量索引，监听 `127.0.0.1:8001` |
 
-Web 前端（`apps/chat-web`）不在 Docker 中运行，可以用 `pnpm dev` 在本地启动，也可以部署到 Vercel。
+Next.js 前端（`apps/chat-web`）不在 Docker 中运行，可以在本地通过 `pnpm dev` 启动，也可以部署到 Vercel。
 
-### 处理流程
+## 机会处理流程
+
+流水线由定时任务或手动扫描触发，候选信息需要通过分类、质量门控、语义去重和信任校验，才会进入评分及分发阶段。
 
 ```mermaid
 flowchart TD
-  A[调度触发<br/>grant_hackathon / social_watch / 手动扫描] --> B[加载 sources.yaml<br/>按 schedule、Tavily 预算、冷却期筛选]
-  B --> C[并行抓取<br/>RSS / 网页 / Tavily / GitHub / Twitter]
-  C --> D[更新 source_health]
-  D --> E{L1 URL 去重<br/>是否新链接？}
-  E -->|否| X1[丢弃]
-  E -->|是| F[关键词粗筛 + LLM 分类<br/>GRANT / HACKATHON / NOISE]
-  F -->|噪音或 LLM 失败| X2[丢弃 / 计入 llm_errors]
-  F -->|有效机会| G[过滤<br/>可申请状态、最低奖金、时效]
-  G -->|不通过| X3[丢弃]
-  G -->|通过| H{L2 语义去重<br/>是否已有事件？}
-  H -->|是| I[合并到已有事件<br/>追加 event_source，heat_count +1]
+  A[调度器：定时任务或手动扫描] --> B[读取 sources.yaml，应用调度 / 预算 / 冷却规则]
+  B --> C[并行抓取：RSS / 网页 / Tavily / GitHub / X]
+  C --> D[更新信息源健康度]
+  D --> E{L1 规范化 URL 去重：是否新链接？}
+  E -->|否| X1[丢弃重复项]
+  E -->|是| F[关键词粗筛 + LLM 分类]
+  F -->|噪音或 LLM 错误| X2[丢弃 / 记录 llm_errors]
+  F -->|资助或黑客松| G[质量门控：可执行阶段、最低奖励、时效性]
+  G -->|不通过| X3[丢弃候选项]
+  G -->|通过| H{L2 语义去重：是否已有事件？}
+  H -->|是| I[合并信息源并增加 heat_count]
+  I --> P[持久化事件更新]
   H -->|否| J[零信任校验]
   J -->|欺诈| X4[标记欺诈并终止]
   J -->|通过| K[评分：ROI / 声誉 / 时效 / 战略]
-  K --> L[推送 Slack 卡片<br/>已忽略的事件跳过]
-  L --> M[生成 Markdown 报告并上传 Slack<br/>仅在本轮有有效机会时]
-  M --> N[写入 schedule log]
+  K --> Q[把评分写回事件]
+  Q --> M[推送 Slack 卡片，已忽略的跳过]
+  M --> R[本轮有合格机会时生成 Markdown 运行报告]
+  P --> N[写入调度日志]
+  R --> N
 ```
 
 ## 快速开始
 
-前置条件：Docker（含 Docker Compose）、至少一个 LLM API Key；如果需要推送到 Slack，还需要 Slack Bot Token。
+**前置条件：** Docker（含 Docker Compose）、至少一个 LLM API Key；如需 Slack 推送，还需要 Slack Bot Token。
+
+1. 创建环境变量文件：
+
+   ```bash
+   cp .env.example .env
+   ```
+
+2. 按[配置](#配置)一节编辑 `.env`，然后构建并启动服务：
+
+   ```bash
+   docker compose up -d --build
+   ```
+
+3. 查看流水线日志：
+
+   ```bash
+   docker compose logs -f --tail 200 pipeline
+   ```
+
+启动后会立即执行一次 `grant_hackathon`、`social_watch` 和 `heartbeat`，之后再按调度策略运行。
+
+在另一个终端启动 Web 面板：
 
 ```bash
+cd apps/chat-web
 cp .env.example .env
-```
-
-按[配置](#配置)一节编辑 `.env`，然后启动全部服务：
-
-```bash
-docker compose up -d --build
-```
-
-查看日志：
-
-```bash
-docker compose logs -f --tail 200 pipeline
-```
-
-启动后会先立即执行一次 `grant_hackathon`、`social_watch` 和 `heartbeat`，之后按下方的调度表运行。
-
-启动 Web 面板：
-
-```bash
-cd apps/chat-web && cp .env.example .env && pnpm install && pnpm dev
+pnpm install
+pnpm dev
 ```
 
 ## 配置
 
-环境变量由 `config/settings.py` 读取。修改 `.env` 后，需要重建容器才能生效。
+环境变量由 `config/settings.py` 读取。修改 `.env` 后，需要重建容器才能让新值生效。
 
 | 分组 | 变量 |
 |---|---|
-| 数据库 | `POSTGRES_USER` `POSTGRES_PASSWORD` `POSTGRES_DB` `POSTGRES_HOST` `POSTGRES_PORT` |
-| 向量库 | `CHROMA_HOST` `CHROMA_PORT` |
-| LLM | `DEEPSEEK_API_KEY` `QWEN_API_KEY` `GEMINI_API_KEY`、`LLM_PROVIDER_PRIORITY`（默认 `deepseek,qwen,gemini`）、`LLM_TIMEOUT_SECONDS` `LLM_MAX_RETRIES` |
-| Slack | `SLACK_BOT_TOKEN` `SLACK_CHANNEL_ID` |
-| 搜索 | `GITHUB_TOKEN`、`TAVILY_API_KEYS`、`TAVILY_SUCCESS_COOLDOWN_MINUTES` `TAVILY_MAX_SOURCES_PER_RUN` |
-| 安全 API | `GOPLUS_API_KEY` `CERTIK_API_KEY` `SCAMSNIFFER_API_KEY` |
-| Twitter | `TWITTER_AUTH_INFO_1` `TWITTER_AUTH_INFO_2` `TWITTER_PASSWORD` `TWITTER_TOTP_SECRET` `TWITTER_COOKIES_FILE` `TWITTER_FETCH_COUNT` |
-| 运行 | `LOG_LEVEL` `HEARTBEAT_INTERVAL_MINUTES` `SOCIAL_WATCH_INTERVAL_MINUTES` `DAILY_SUMMARY_ENABLED` `DAILY_SUMMARY_CRON` |
-| 过滤 | `MIN_AMOUNT_USD`（默认 5000）、`STALE_MAX_AGE_DAYS`（60）、`STALE_START_DATE_GRACE_DAYS`（14） |
-| Chat API | `CHAT_API_INTERNAL_KEY`（需要和前端配置的值一致） |
+| 数据库 | `POSTGRES_USER`、`POSTGRES_PASSWORD`、`POSTGRES_DB`、`POSTGRES_HOST`、`POSTGRES_PORT` |
+| 向量库 | `CHROMA_HOST`、`CHROMA_PORT` |
+| LLM | `DEEPSEEK_API_KEY`、`QWEN_API_KEY`、`GEMINI_API_KEY`、`LLM_PROVIDER_PRIORITY`（默认：`deepseek,qwen,gemini`）、`LLM_TIMEOUT_SECONDS`、`LLM_MAX_RETRIES` |
+| Slack | `SLACK_BOT_TOKEN`、`SLACK_CHANNEL_ID` |
+| 搜索 | `GITHUB_TOKEN`、`TAVILY_API_KEYS`、`TAVILY_SUCCESS_COOLDOWN_MINUTES`、`TAVILY_MAX_SOURCES_PER_RUN` |
+| 安全 API | `GOPLUS_API_KEY`、`CERTIK_API_KEY`、`SCAMSNIFFER_API_KEY` |
+| Twitter | `TWITTER_AUTH_INFO_1`、`TWITTER_AUTH_INFO_2`、`TWITTER_PASSWORD`、`TWITTER_TOTP_SECRET`、`TWITTER_COOKIES_FILE`、`TWITTER_FETCH_COUNT` |
+| 运行 | `LOG_LEVEL`、`HEARTBEAT_INTERVAL_MINUTES`、`SOCIAL_WATCH_INTERVAL_MINUTES`、`DAILY_SUMMARY_ENABLED`、`DAILY_SUMMARY_CRON` |
+| 过滤 | `MIN_AMOUNT_USD`（默认：`5000`）、`STALE_MAX_AGE_DAYS`（默认：`60`）、`STALE_START_DATE_GRACE_DAYS`（默认：`14`） |
+| Chat API | `CHAT_API_INTERNAL_KEY`（需要与前端配置一致） |
 
-前端变量（`apps/chat-web/.env`）：`CHAT_API_BASE_URL`（例如 `http://127.0.0.1:8000`）、`CHAT_API_INTERNAL_KEY`、`DEEPSEEK_API_KEY`、`DEEPSEEK_BASE_URL`、`CHAT_AGENT_MODEL`（默认 `deepseek-chat`）。
+`apps/chat-web/.env` 中的前端变量包括 `CHAT_API_BASE_URL`（例如 `http://127.0.0.1:8000`）、`CHAT_API_INTERNAL_KEY`、`DEEPSEEK_API_KEY`、`DEEPSEEK_BASE_URL` 和 `CHAT_AGENT_MODEL`（默认：`deepseek-chat`）。
 
-### 信息源
+## 信息源
 
-信息源在 `config/sources.yaml` 中配置。每条 source 通过 `fetch_method` 指定抓取方式（`rss`、`web_scraper`、`tavily_search`、`github_search` 或 `twitter`），还可以附带链相关的元数据：
+信息源配置在 `config/sources.yaml`。每项通过 `fetch_method` 指定抓取方式：`rss`、`web_scraper`、`tavily_search`、`github_search` 或 `twitter`。可选元数据包括：
 
-- `chain`：生态的规范 id；已批准的链列在 `config/chains.yaml` 中
-- `source_tier`：`official` 或 `discovery`（基于搜索的抓取方式默认为 `discovery`）
-- `signal_type`：`grant`、`hackathon`、`social` 或 `discovery`
+- `chain`：生态规范 ID；已批准的链列在 `config/chains.yaml` 中。
+- `source_tier`：`official` 或 `discovery`；搜索发现类信息源默认为 `discovery`。
+- `signal_type`：`grant`、`hackathon`、`social` 或 `discovery`。
 
-`official` 源在校验阶段会获得更高的信任度，并且只要截止日期没过，就不会因为时效原因被丢弃。如果要新增一种信息源类型，先在 `src/fetchers/` 中实现 fetcher，在 `src/fetchers/builder.py` 的 `FETCHER_MAP` 中注册，再到 `sources.yaml` 里添加条目。
+官方信息源在校验阶段会获得信任加权；只要截止日期未过，就不会仅因信息较旧而被丢弃。新增信息源类型时，在 `src/fetchers/` 实现 fetcher，在 `src/fetchers/builder.py` 的 `FETCHER_MAP` 中注册，再在 `sources.yaml` 中添加配置。
 
 ## 调度策略（Asia/Shanghai）
 
-调度以 `src/scheduler/jobs.py` 为准，`sources.yaml` 中的 `schedules:` 段只是说明，代码不会读取。
+调度以 `src/scheduler/jobs.py` 为准。`sources.yaml` 中的 `schedules:` 只是说明信息，代码不会读取它。
 
 | 任务 | 触发时间 |
 |---|---|
-| `grant_hackathon` | 每天 09:00 和 21:00（每轮覆盖全部启用的 Tavily 源，即 14 个源 x 每天 2 次） |
-| `social_watch` | 每 `SOCIAL_WATCH_INTERVAL_MINUTES` 分钟（默认 15） |
-| `heartbeat` | 每 `HEARTBEAT_INTERVAL_MINUTES` 分钟（默认 30） |
-| `daily_summary` | 按 `DAILY_SUMMARY_CRON`（默认 23:55） |
-| `tavily_unlock` | 每天 00:00，清理残留的 Tavily 冷却状态（未显式配置冷却的源走这条兜底） |
+| `grant_hackathon` | 每天 09:00 和 21:00；每轮搜索所有启用的 Tavily 信息源 |
+| `social_watch` | 每 `SOCIAL_WATCH_INTERVAL_MINUTES` 分钟执行一次（默认：15） |
+| `heartbeat` | 每 `HEARTBEAT_INTERVAL_MINUTES` 分钟执行一次（默认：30），统计运行和信息源健康数据，不发 Slack 消息 |
+| `daily_summary` | 按 `DAILY_SUMMARY_CRON` 执行（默认：23:55） |
+| `tavily_unlock` | 每天 00:00 清除 Tavily 信息源的成功冷却 |
 
-Bounty 不在系统范围内：`bounty` 调度不会注册，分类器也会把 bounty 类信息判为噪音。
+Bounty 不在系统范围内：`bounty` 任务没有注册，分类器也会把 bounty 类信息视为噪音。
 
 ## Slack 推送
 
-- **机会卡片**：每个新增且未被忽略的事件推送一张卡片。
-- **运行报告**：本轮有有效机会时，在 `reports/` 下生成 Markdown 报告并上传到 Slack；没有有效机会时，卡片和报告都不发。
-- **每日汇总**：每天固定发送，包含抓取、去重和校验的统计，并列出当天新增的合格机会及其来源。
-- **Bot 权限**：必须有 `chat:write`；上传报告还需要 `files:write`，缺少时上传会报 `missing_scope`。
+- **机会卡片：** 每个新出现且未被忽略的事件推送一张卡片。
+- **运行报告：** 本轮产生合格机会时，在 `reports/` 生成 Markdown 报告并上传 Slack；没有合格机会时，不发送卡片或报告。
+- **每日汇总：** 包含抓取、去重、校验统计，以及当天新增的合格机会和信息源。
+- **Bot 权限：** 必须有 `chat:write`；上传报告还需要 `files:write`，否则会出现 `missing_scope`。
 
 ## Grant Radar Web
 
-`apps/chat-web` 是一个 Next.js 应用，后端是 `chat-api`：
+`apps/chat-web` 是一个 Next.js 应用，后端是 `chat-api`，包含两个页面：
 
-- 面板：机会列表（支持筛选、忽略、删除）、信息源健康度、调度日志、每日汇总
-- 操作：手动扫描、解除 Tavily 锁、重置去重
-- Copilot：只读助手，所有回答都基于数据库工具，包括目标筛选、可靠性校验、深入调查和参与方案建议
+- **机会处理页**（`/`）：左边是机会列表，右边是当前选中机会的详情。每条机会处于 *New*（待处理）、*Shortlisted*（跟进）或 *Dismissed*（忽略）三种状态之一，状态存在 `events.triage_status` 字段里，整个团队共享。搜索、筛选、排序和当前选中项都记录在 URL 里，把链接发给同事就能打开同一个视图。快捷键：`J`/`K` 上下移动，`S` 跟进，`D` 忽略，`Z` 撤销，`O` 打开申请页，`/` 搜索。
+- **详情标签页：** *Overview*（简介、分项评分、来源）、*Verification*（可信度评分、证据、相似历史事件、参与方式；点击后才运行）、*Ask Copilot*（只读助手，回答都基于数据库工具）。
+- **运维页**（`/operations`）：手动扫描、信息源健康度（默认只列出有问题的源）、最近运行记录，以及维护操作：立即发送日报、解除 Tavily 锁、重置去重索引。
 
-后端接口分布在 `/api/v1/dashboard/*`、`/api/v1/chat/*` 和 `/api/v1/admin/*` 下（见 `src/chat_api/app.py`）。除 `chat/health` 外，其他接口都需要带 `X-Internal-Key` 请求头。前端可以部署到 Vercel，配置同样的 `CHAT_API_*` 变量即可。`chat-api` 应使用只读数据库凭据，并与 pipeline 的凭据分开。
+后端接口位于 `/api/v1/dashboard/*`、`/api/v1/chat/*` 和 `/api/v1/admin/*`（参见 `src/chat_api/app.py`）。除 `chat/health` 外，其余接口都需要 `X-Internal-Key` 请求头。前端可以部署到 Vercel，并配置相同的 `CHAT_API_*` 变量。`chat-api` 会写入处理状态和删除记录，因此需要 `events` 表的写权限；它的凭据应与 pipeline 分开。
 
 ## 目录结构
 
-```
+```text
 src/
-  main.py          主入口与 run_pipeline()
+  main.py          流水线入口与 run_pipeline()
   scheduler/       APScheduler 任务注册
-  fetchers/        各类抓取器与注册表构建
+  fetchers/        抓取器与注册表构建
   dedup/           L1 URL 去重、L2 语义去重、向量索引对账
   classifier/      关键词过滤、LLM 网关、分类器、评分器
   verifier/        零信任校验、白名单、安全 API
   dispatch/        Slack、报告、心跳、每日汇总
   db/              SQLAlchemy 模型与查询
-  chat_api/        面板与 Copilot 使用的 FastAPI 后端
+  chat_api/        面板和 Copilot 使用的 FastAPI 后端
   agent/           Copilot 调查服务
-apps/chat-web/     Grant Radar Web（Next.js）
+apps/chat-web/     Next.js Web 面板
 config/            sources.yaml、chains.yaml、keywords.yaml、settings.py
-scripts/           运维与迁移脚本
+scripts/           运维及迁移脚本
 tests/             pytest 测试
 docs/              运维手册、审计报告、设计文档
 ```
@@ -162,13 +201,15 @@ docs/              运维手册、审计报告、设计文档
 ## 开发
 
 ```bash
-pip install -r requirements.txt && pytest -q
+pip install -r requirements.txt
+pytest -q
 ```
 
 ```bash
-cd apps/chat-web && pnpm test
+cd apps/chat-web
+pnpm test
 ```
 
 ## 运维
 
-数据库备份与恢复、运维脚本、信息源健康度查询和常见问题排查，请参阅[运维手册](docs/operations.md)。
+数据库备份和恢复、数据库迁移（升级到机会处理面板前需先执行 `scripts/migrate_events_triage_status.py`）、运维脚本、信息源健康度查询及常见问题排查，请参阅[运维手册](docs/operations.md)。

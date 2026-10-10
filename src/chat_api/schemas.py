@@ -112,38 +112,77 @@ class ProposeOptionsResponse(BaseModel):
     options: list[ProposedOption]
 
 
+TriageStatus = Literal["new", "shortlisted", "dismissed"]
+
+
+class DashboardOpportunityScores(BaseModel):
+    roi: float | None = None
+    reputation: float | None = None
+    timeliness: float | None = None
+    strategy: float | None = None
+
+
 class DashboardOpportunityItem(BaseModel):
     id: int
     score: float | None = None
+    scores: DashboardOpportunityScores = DashboardOpportunityScores()
     type: str
     title: str
+    summary: str = ""
     ecosystem: str | None = None
     amount: str | None = None
-    deadline: str
+    # ISO-8601 or null for rolling programmes; the UI renders relative time.
+    deadline: str | None = None
+    first_seen: str | None = None
     heat: int
+    source_count: int = 0
     verified: bool
-    source_trust: str
     verification_verdict: str
+    source_trust: str
     apply_url: str
-    is_dismissed: bool = False
+    triage_status: TriageStatus = "new"
+
+
+class DashboardOpportunitySource(BaseModel):
+    name: str
+    type: str
+    url: str
+    fetched_at: str | None = None
+
+
+class DashboardOpportunityDetail(DashboardOpportunityItem):
+    description: str = ""
+    sources: list[DashboardOpportunitySource] = []
 
 
 class DashboardOpportunityMetrics(BaseModel):
-    total_shown: int
-    avg_score: float
+    """Whole-board stats; they ignore the list filters."""
+
+    to_review: int
+    shortlisted: int
+    closing_soon: int
     verified_percent: int
     # Coverage split behind verified_percent. Without these the dashboard can only
     # show "0% verified" and cannot say that nothing was checked at all.
     verified_count: int = 0
     unchecked_count: int = 0
-    grants: int
-    hackathons: int
-    official: int
-    discovery: int
+    total: int
+
+
+class DashboardOpportunityCounts(BaseModel):
+    """Rows each status tab would list under the current filters."""
+
+    new: int
+    shortlisted: int
+    dismissed: int
+    all: int
 
 
 class DashboardOpportunitiesResponse(BaseModel):
     metrics: DashboardOpportunityMetrics
+    counts: DashboardOpportunityCounts
+    ecosystems: list[str] = []
+    next_scan_at: str | None = None
     items: list[DashboardOpportunityItem]
 
 
@@ -153,10 +192,8 @@ class DeleteOpportunityResponse(BaseModel):
     deleted: bool
 
 
-class DismissEventResponse(BaseModel):
-    status: str
-    event_id: int
-    is_dismissed: bool
+class TriageRequest(BaseModel):
+    status: TriageStatus
 
 
 class DashboardSourceHealthItem(BaseModel):
@@ -164,6 +201,8 @@ class DashboardSourceHealthItem(BaseModel):
     status: str
     last_success: str
     last_fetch: str
+    last_success_at: str | None = None
+    last_fetch_at: str | None = None
     failures: int
     last_error: str
 
@@ -185,6 +224,7 @@ class DashboardScheduleLogItem(BaseModel):
     job: str
     status: str
     started: str
+    started_at: str | None = None
     fetched: int
     new: int
     deduped: int

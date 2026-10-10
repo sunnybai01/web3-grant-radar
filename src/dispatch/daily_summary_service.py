@@ -35,9 +35,7 @@ def _active_events(db: Session):
     return db.query(Event).filter(
         Event.event_type.notin_(EXCLUDED_EVENT_TYPES),
         Event.status.notin_(EXCLUDED_EVENT_STATUSES),
-        # IS NOT TRUE, not "= false": the column is nullable, so rows predating
-        # it hold NULL and must still count as not-dismissed.
-        Event.is_dismissed.is_not(True),
+        Event.triage_status != "dismissed",
     )
 
 

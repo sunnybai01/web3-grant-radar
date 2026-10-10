@@ -2,173 +2,214 @@
 
 **English** | [简体中文](README.zh-CN.md)
 
-> Track Web3 grants & hackathons — deduplicated, verified and scored.
+> Track Web3 grants and hackathons — deduplicated, verified, and scored.
 
-Web3 Grant Radar continuously watches ecosystem feeds, websites, search and X/Twitter for grant programs and hackathons. Every candidate goes through deduplication, LLM classification, zero-trust verification and scoring. What survives is pushed to Slack and lands in a web dashboard where a read-only copilot helps the team dig into each opportunity.
+![Python pipeline](https://img.shields.io/badge/Pipeline-Python-3776AB?logo=python&logoColor=white)
+![API](https://img.shields.io/badge/API-FastAPI-009688?logo=fastapi&logoColor=white)
+![Web](https://img.shields.io/badge/Web-Next.js-111111?logo=nextdotjs&logoColor=white)
+![Deployment](https://img.shields.io/badge/Deployment-Docker%20Compose-2496ED?logo=docker&logoColor=white)
+
+Web3 Grant Radar continuously monitors ecosystem feeds, project websites, Tavily search results, and X/Twitter for grant programs and hackathons. Each candidate passes through deduplication, LLM classification, zero-trust verification, and scoring. Qualified opportunities are stored, sent to Slack, and land in a web dashboard where the team triages them — shortlist or dismiss — with help from a read-only Copilot.
+
+## Contents
+
+- [Features](#features)
+- [Architecture](#architecture)
+- [Opportunity pipeline](#opportunity-pipeline)
+- [Quick start](#quick-start)
+- [Configuration](#configuration)
+- [Sources](#sources)
+- [Schedule](#schedule-asiashanghai)
+- [Slack delivery](#slack-delivery)
+- [Web dashboard](#grant-radar-web)
+- [Project layout](#project-layout)
+- [Development](#development)
+- [Operations](#operations)
 
 ## Features
 
-- **Multi-source fetching**: RSS, web scraper, Tavily search, GitHub issue search and X/Twitter (Twikit), all configured in `config/sources.yaml`
-- **Two-layer dedup**: L1 canonical-URL dedup, then L2 semantic dedup (ChromaDB embeddings plus deadline and ecosystem vetoes)
-- **Classification and gates**: keyword prefilter, then LLM classification (DeepSeek / Qwen / Gemini with fallback), plus actionability, minimum-reward and staleness gates
-- **Zero-trust verification**: origin anchoring, GitHub/domain cross-referencing and security APIs (GoPlus / CertiK / ScamSniffer); events judged as fraud are dropped
-- **Scoring**: ROI, reputation, timeliness and strategic fit
-- **Delivery**: Slack Block Kit cards, per-run Markdown reports, a daily summary and heartbeats
-- **Grant Radar web**: a Next.js dashboard (`apps/chat-web`) with opportunities, source health, schedule logs, manual scans and a read-only verification copilot
+- **Multi-source discovery** — RSS, website scraping, Tavily search, and X/Twitter via Twikit, configured centrally in `config/sources.yaml`. A GitHub issue-search fetcher is also available, though no GitHub sources are configured by default.
+- **Two-stage deduplication** — L1 canonical-URL deduplication, followed by L2 semantic deduplication with ChromaDB embeddings and deadline/ecosystem vetoes.
+- **LLM-assisted classification** — keyword prefiltering, then DeepSeek / Qwen / Gemini classification with provider fallback.
+- **Quality gates** — reject opportunities that are not actionable, fall below the minimum reward, or are stale.
+- **Zero-trust verification** — origin anchoring, GitHub/domain cross-checks, and security APIs (GoPlus / CertiK / ScamSniffer). Items judged fraudulent are stopped.
+- **Opportunity scoring** — ROI, reputation, timeliness, and strategic fit.
+- **Slack delivery** — Block Kit cards, per-run Markdown reports, and a daily summary.
+- **Triage dashboard** — `apps/chat-web` lists new opportunities for the team to shortlist or dismiss, with on-demand verification, a read-only Copilot, and an operations page for scans, source health, and run logs.
 
 ## Architecture
 
-| Service (`docker compose`) | Container | Role |
+The system separates scheduled opportunity discovery from dashboard/API traffic. The pipeline owns discovery and processing; `chat-api` serves the dashboard and writes only triage decisions and deletions, so give it its own database credentials.
+
+![Web3 Grant Radar system architecture](docs/assets/architecture.svg)
+
+> `docs/architecture.mmd` keeps the same components and relationships in an editable Mermaid representation; Mermaid uses its own layout, so the arrangement is not pixel-identical.
+
+### Runtime topology
+
+| Docker Compose service | Container | Responsibility |
 |---|---|---|
-| `pipeline` | `grant_radar_pipeline` | Scheduler and fetch-to-dispatch pipeline (`python -m src.main`) |
-| `chat-api` | `grant_radar_chat_api` | FastAPI backend for the dashboard and copilot, on `127.0.0.1:8000` |
-| `postgres` | `grant_radar_postgres` | Business data (events, raw signals, source health, logs) |
-| `chromadb` | `grant_radar_chromadb` | Vector index for L2 semantic dedup, on `127.0.0.1:8001` |
+| `pipeline` | `grant_radar_pipeline` | Scheduler and fetch-to-dispatch workflow; entry point: `python -m src.main` |
+| `chat-api` | `grant_radar_chat_api` | FastAPI backend for the dashboard and Copilot, listening on `127.0.0.1:8000` |
+| `postgres` | `grant_radar_postgres` | Events, raw signals, source health, and run logs |
+| `chromadb` | `grant_radar_chromadb` | Vector index for L2 semantic deduplication, listening on `127.0.0.1:8001` |
 
-The web frontend (`apps/chat-web`) runs outside Docker, either with `pnpm dev` or on Vercel.
+The Next.js frontend (`apps/chat-web`) runs outside Docker. Start it locally with `pnpm dev` or deploy it to Vercel.
 
-### Pipeline
+## Opportunity pipeline
+
+The pipeline runs scheduled jobs or a manual scan, then filters candidates before they reach the scoring and delivery stages.
 
 ```mermaid
 flowchart TD
-  A[Scheduler<br/>grant_hackathon / social_watch / manual scan] --> B[Load sources.yaml<br/>filter by schedule, Tavily budget, cooldowns]
-  B --> C[Fetch in parallel<br/>RSS / Web Scraper / Tavily / GitHub / Twitter]
-  C --> D[Update source_health]
-  D --> E{L1 URL dedup<br/>new canonical URL?}
-  E -->|no| X1[Drop]
-  E -->|yes| F[Keyword prefilter + LLM classification<br/>GRANT / HACKATHON / NOISE]
-  F -->|noise or LLM error| X2[Drop / count as llm_errors]
-  F -->|opportunity| G[Gates<br/>actionable stage, minimum reward, staleness]
-  G -->|fail| X3[Drop]
-  G -->|pass| H{L2 semantic dedup<br/>same opportunity?}
-  H -->|yes| I[Merge into existing event<br/>add event_source, heat_count +1]
-  H -->|no| J[Zero-trust verification]
-  J -->|fraud| X4[Mark fraud and stop]
-  J -->|ok| K[Score: ROI / Reputation / Timeliness / Strategy]
-  K --> L[Push Slack card<br/>skipped if dismissed]
-  L --> M[Markdown report + Slack upload<br/>only when the run produced opportunities]
-  M --> N[Write schedule log]
+  A[Scheduler: scheduled jobs or manual scan] --> B[Load sources.yaml and apply schedule / budget / cooldown rules]
+  B --> C[Fetch in parallel: RSS / websites / Tavily / GitHub / X]
+  C --> D[Update source health]
+  D --> E{L1 canonical URL dedup: new URL?}
+  E -->|No| X1[Drop duplicate]
+  E -->|Yes| F[Keyword prefilter + LLM classification]
+  F -->|Noise or LLM error| X2[Drop / record llm_errors]
+  F -->|Grant or hackathon| G[Quality gates: actionable stage, minimum reward, freshness]
+  G -->|Fail| X3[Drop candidate]
+  G -->|Pass| H{L2 semantic dedup: existing event?}
+  H -->|Yes| I[Merge source and increment heat_count]
+  I --> P[Persist event update]
+  H -->|No| J[Zero-trust verification]
+  J -->|Fraud| X4[Mark fraud and stop]
+  J -->|Pass| K[Score: ROI / reputation / timeliness / strategy]
+  K --> Q[Save scores on the event]
+  Q --> M[Slack card unless dismissed]
+  M --> R[Markdown run report when the run found qualified opportunities]
+  P --> N[Write schedule log]
+  R --> N
 ```
 
 ## Quick start
 
-Prerequisites: Docker with Docker Compose, at least one LLM API key, and optionally a Slack bot token.
+**Prerequisites:** Docker with Docker Compose, at least one LLM API key, and (optionally) a Slack bot token.
+
+1. Create your environment file:
+
+   ```bash
+   cp .env.example .env
+   ```
+
+2. Edit `.env` as described in [Configuration](#configuration), then build and start the services:
+
+   ```bash
+   docker compose up -d --build
+   ```
+
+3. Follow the pipeline logs:
+
+   ```bash
+   docker compose logs -f --tail 200 pipeline
+   ```
+
+At startup, the pipeline immediately runs `grant_hackathon`, `social_watch`, and `heartbeat` once, then follows the configured schedule.
+
+Start the web dashboard in a separate terminal:
 
 ```bash
+cd apps/chat-web
 cp .env.example .env
-```
-
-Edit `.env` (see [Configuration](#configuration)), then start everything:
-
-```bash
-docker compose up -d --build
-```
-
-Follow the logs:
-
-```bash
-docker compose logs -f --tail 200 pipeline
-```
-
-On startup the pipeline runs `grant_hackathon`, `social_watch` and `heartbeat` once immediately, then follows the schedule below.
-
-Start the web dashboard:
-
-```bash
-cd apps/chat-web && cp .env.example .env && pnpm install && pnpm dev
+pnpm install
+pnpm dev
 ```
 
 ## Configuration
 
-Environment variables are read by `config/settings.py`. After changing `.env`, recreate the containers so the new values take effect.
+Environment variables are read by `config/settings.py`. Recreate the containers after changing `.env` so the new values take effect.
 
 | Group | Variables |
 |---|---|
-| Database | `POSTGRES_USER` `POSTGRES_PASSWORD` `POSTGRES_DB` `POSTGRES_HOST` `POSTGRES_PORT` |
-| Vector store | `CHROMA_HOST` `CHROMA_PORT` |
-| LLM | `DEEPSEEK_API_KEY` `QWEN_API_KEY` `GEMINI_API_KEY`, `LLM_PROVIDER_PRIORITY` (default `deepseek,qwen,gemini`), `LLM_TIMEOUT_SECONDS` `LLM_MAX_RETRIES` |
-| Slack | `SLACK_BOT_TOKEN` `SLACK_CHANNEL_ID` |
-| Search | `GITHUB_TOKEN`, `TAVILY_API_KEYS`, `TAVILY_SUCCESS_COOLDOWN_MINUTES` `TAVILY_MAX_SOURCES_PER_RUN` |
-| Security APIs | `GOPLUS_API_KEY` `CERTIK_API_KEY` `SCAMSNIFFER_API_KEY` |
-| Twitter | `TWITTER_AUTH_INFO_1` `TWITTER_AUTH_INFO_2` `TWITTER_PASSWORD` `TWITTER_TOTP_SECRET` `TWITTER_COOKIES_FILE` `TWITTER_FETCH_COUNT` |
-| Runtime | `LOG_LEVEL` `HEARTBEAT_INTERVAL_MINUTES` `SOCIAL_WATCH_INTERVAL_MINUTES` `DAILY_SUMMARY_ENABLED` `DAILY_SUMMARY_CRON` |
-| Filtering | `MIN_AMOUNT_USD` (default 5000), `STALE_MAX_AGE_DAYS` (60), `STALE_START_DATE_GRACE_DAYS` (14) |
-| Chat API | `CHAT_API_INTERNAL_KEY` (must match the frontend's value) |
+| Database | `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `POSTGRES_HOST`, `POSTGRES_PORT` |
+| Vector store | `CHROMA_HOST`, `CHROMA_PORT` |
+| LLM | `DEEPSEEK_API_KEY`, `QWEN_API_KEY`, `GEMINI_API_KEY`, `LLM_PROVIDER_PRIORITY` (default: `deepseek,qwen,gemini`), `LLM_TIMEOUT_SECONDS`, `LLM_MAX_RETRIES` |
+| Slack | `SLACK_BOT_TOKEN`, `SLACK_CHANNEL_ID` |
+| Search | `GITHUB_TOKEN`, `TAVILY_API_KEYS`, `TAVILY_SUCCESS_COOLDOWN_MINUTES`, `TAVILY_MAX_SOURCES_PER_RUN` |
+| Security APIs | `GOPLUS_API_KEY`, `CERTIK_API_KEY`, `SCAMSNIFFER_API_KEY` |
+| Twitter | `TWITTER_AUTH_INFO_1`, `TWITTER_AUTH_INFO_2`, `TWITTER_PASSWORD`, `TWITTER_TOTP_SECRET`, `TWITTER_COOKIES_FILE`, `TWITTER_FETCH_COUNT` |
+| Runtime | `LOG_LEVEL`, `HEARTBEAT_INTERVAL_MINUTES`, `SOCIAL_WATCH_INTERVAL_MINUTES`, `DAILY_SUMMARY_ENABLED`, `DAILY_SUMMARY_CRON` |
+| Filtering | `MIN_AMOUNT_USD` (default: `5000`), `STALE_MAX_AGE_DAYS` (default: `60`), `STALE_START_DATE_GRACE_DAYS` (default: `14`) |
+| Chat API | `CHAT_API_INTERNAL_KEY` (must match the frontend setting) |
 
-Frontend variables (`apps/chat-web/.env`): `CHAT_API_BASE_URL` (for example `http://127.0.0.1:8000`), `CHAT_API_INTERNAL_KEY`, `DEEPSEEK_API_KEY`, `DEEPSEEK_BASE_URL` and `CHAT_AGENT_MODEL` (default `deepseek-chat`).
+Frontend variables in `apps/chat-web/.env` include `CHAT_API_BASE_URL` (for example, `http://127.0.0.1:8000`), `CHAT_API_INTERNAL_KEY`, `DEEPSEEK_API_KEY`, `DEEPSEEK_BASE_URL`, and `CHAT_AGENT_MODEL` (default: `deepseek-chat`).
 
-### Sources
+## Sources
 
-Sources live in `config/sources.yaml`. Each entry chooses a `fetch_method` (`rss`, `web_scraper`, `tavily_search`, `github_search` or `twitter`) and can carry chain metadata:
+Sources are defined in `config/sources.yaml`. Each entry selects a `fetch_method`: `rss`, `web_scraper`, `tavily_search`, `github_search`, or `twitter`. Optional metadata includes:
 
-- `chain`: canonical ecosystem id; approved chains are listed in `config/chains.yaml`
-- `source_tier`: `official` or `discovery` (defaults to `discovery` for search-based methods)
-- `signal_type`: `grant`, `hackathon`, `social` or `discovery`
+- `chain` — canonical ecosystem ID; approved chains are listed in `config/chains.yaml`.
+- `source_tier` — `official` or `discovery`. Search-based sources default to `discovery`.
+- `signal_type` — `grant`, `hackathon`, `social`, or `discovery`.
 
-`official` sources get a trust uplift during verification and are never dropped as stale unless their deadline has passed. To add a new kind of source, implement a fetcher in `src/fetchers/`, register it in `FETCHER_MAP` in `src/fetchers/builder.py`, then add entries to `sources.yaml`.
+Official sources receive a trust uplift during verification and are not discarded as stale unless their deadline has passed. To add a source type, implement a fetcher under `src/fetchers/`, register it in `FETCHER_MAP` in `src/fetchers/builder.py`, and add entries to `sources.yaml`.
 
 ## Schedule (Asia/Shanghai)
 
-The source of truth is `src/scheduler/jobs.py`. The `schedules:` block in `sources.yaml` is descriptive only.
+The source of truth is `src/scheduler/jobs.py`. The `schedules:` block in `sources.yaml` is descriptive; the code does not read it.
 
 | Job | When |
 |---|---|
-| `grant_hackathon` | 09:00 and 21:00 daily (each run searches every enabled Tavily source, so 14 sources x 2/day) |
-| `social_watch` | every `SOCIAL_WATCH_INTERVAL_MINUTES` (default 15) |
-| `heartbeat` | every `HEARTBEAT_INTERVAL_MINUTES` (default 30) |
-| `daily_summary` | `DAILY_SUMMARY_CRON` (default 23:55) |
-| `tavily_unlock` | 00:00, clears leftover Tavily cooldown state (fallback for sources without an explicit cooldown) |
+| `grant_hackathon` | Daily at 09:00 and 21:00; every enabled Tavily source is searched in each run |
+| `social_watch` | Every `SOCIAL_WATCH_INTERVAL_MINUTES` minutes (default: 15) |
+| `heartbeat` | Every `HEARTBEAT_INTERVAL_MINUTES` minutes (default: 30); collects run and source-health stats (no Slack message) |
+| `daily_summary` | According to `DAILY_SUMMARY_CRON` (default: 23:55) |
+| `tavily_unlock` | Daily at 00:00; clears the Tavily success cooldowns |
 
-Bounties are out of scope: the `bounty` schedule is not registered, and the classifier treats bounty items as noise.
+Bounties are out of scope: the `bounty` job is not registered, and the classifier treats bounty items as noise.
 
-## Slack output
+## Slack delivery
 
-- **Opportunity cards**: one card per new, non-dismissed event.
-- **Run report**: when a run produced opportunities, a Markdown report is written to `reports/` and uploaded to Slack. Runs with no opportunities send neither.
-- **Daily summary**: sent every day with fetch, dedup and verification stats, and lists the day's new qualified opportunities with their sources.
-- **Bot scopes**: `chat:write` is required; `files:write` is needed for report uploads, otherwise uploads fail with `missing_scope`.
+- **Opportunity cards:** one card per new event that has not been dismissed.
+- **Run report:** when a run produces qualified opportunities, a Markdown report is written under `reports/` and uploaded to Slack. Runs with no qualified opportunities send neither cards nor reports.
+- **Daily summary:** includes fetch, deduplication, and verification stats plus newly qualified opportunities and their sources.
+- **Bot scopes:** `chat:write` is required. `files:write` is also needed for report uploads; without it, uploads fail with `missing_scope`.
 
-## Grant Radar web
+## Grant Radar Web
 
-`apps/chat-web` is a Next.js app backed by `chat-api`:
+`apps/chat-web` is a Next.js app backed by `chat-api`, with two pages:
 
-- Dashboard: opportunities (filter, dismiss, delete), source health, schedule logs, daily summary
-- Actions: manual scan, Tavily unlock, dedup reset
-- Copilot: a read-only assistant that answers from database tools: target selection, verification, investigation and build proposals
+- **Triage** (`/`): the opportunity list on the left, the selected opportunity on the right. Each opportunity is *New*, *Shortlisted*, or *Dismissed*; the decision is stored in `events.triage_status` and shared by the whole team. Search, filters, sorting, and the selection live in the URL, so a link opens the same view. Keyboard: `J`/`K` move, `S` shortlist, `D` dismiss, `Z` undo, `O` open the apply page, `/` search.
+- **Detail tabs:** *Overview* (summary, score breakdown, sources), *Verification* (trust score, evidence, similar past events, ways to take part; runs on request), and *Ask Copilot* (a read-only assistant that answers from database tools).
+- **Operations** (`/operations`): manual scan, source health (problems first), recent runs, and maintenance actions — send the daily summary, unlock Tavily sources, reset the dedup index.
 
-The backend routes live under `/api/v1/dashboard/*`, `/api/v1/chat/*` and `/api/v1/admin/*` (see `src/chat_api/app.py`). Every route except `chat/health` requires the `X-Internal-Key` header. The frontend can be deployed to Vercel with the same `CHAT_API_*` variables. Give `chat-api` read-only database credentials and keep them separate from the pipeline's.
+Backend routes live under `/api/v1/dashboard/*`, `/api/v1/chat/*`, and `/api/v1/admin/*` (see `src/chat_api/app.py`). Every route except `chat/health` requires the `X-Internal-Key` header. The frontend can be deployed to Vercel with the same `CHAT_API_*` variables. `chat-api` writes triage decisions and deletions, so it needs write access to `events`; keep its credentials separate from the pipeline's.
 
 ## Project layout
 
-```
+```text
 src/
-  main.py          pipeline entry point and run_pipeline()
+  main.py          Pipeline entry point and run_pipeline()
   scheduler/       APScheduler job registration
-  fetchers/        source fetchers and registry builder
-  dedup/           L1 URL dedup, L2 semantic dedup, vector index reconcile
-  classifier/      keyword filter, LLM gateway, classifier, scorer
-  verifier/        zero-trust verification, whitelist, security APIs
+  fetchers/        Fetchers and registry builder
+  dedup/           L1 URL dedup, L2 semantic dedup, vector-index reconciliation
+  classifier/      Keyword filter, LLM gateway, classifier, scorer
+  verifier/        Zero-trust verification, whitelist, security APIs
   dispatch/        Slack client, reports, heartbeat, daily summary
   db/              SQLAlchemy models and queries
-  chat_api/        FastAPI backend for the dashboard and copilot
-  agent/           copilot investigation service
-apps/chat-web/     Grant Radar web (Next.js)
+  chat_api/        FastAPI backend for dashboard and Copilot
+  agent/           Copilot investigation service
+apps/chat-web/     Next.js dashboard
 config/            sources.yaml, chains.yaml, keywords.yaml, settings.py
-scripts/           ops and migration scripts
+scripts/           Operations and migration scripts
 tests/             pytest suite
-docs/              operations guide, audits, design specs
+docs/              Operations guide, audits, and design docs
 ```
 
 ## Development
 
 ```bash
-pip install -r requirements.txt && pytest -q
+pip install -r requirements.txt
+pytest -q
 ```
 
 ```bash
-cd apps/chat-web && pnpm test
+cd apps/chat-web
+pnpm test
 ```
 
 ## Operations
 
-Database backup and restore, ops scripts, source-health queries and troubleshooting are covered in the [operations guide](docs/operations.md) (in Chinese).
+Database backup and restore, migrations (run `scripts/migrate_events_triage_status.py` before upgrading to the triage dashboard), operations scripts, source-health queries, and troubleshooting are covered in the [operations guide](docs/operations.md) (in Chinese).

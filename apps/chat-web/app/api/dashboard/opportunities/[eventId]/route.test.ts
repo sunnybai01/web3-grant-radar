@@ -12,13 +12,15 @@ vi.mock("@/lib/api", async () => {
   };
 });
 
-import { DELETE } from "./route";
+import { DELETE, GET } from "./route";
 import { api } from "@/lib/api";
 
 const deleteMock = api.delete as unknown as ReturnType<typeof vi.fn>;
+const getMock = api.get as unknown as ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   deleteMock.mockReset();
+  getMock.mockReset();
 });
 
 afterEach(() => {
@@ -55,4 +57,16 @@ it("maps an upstream failure onto a 502 response", async () => {
   await expect(response.json()).resolves.toEqual({
     error: "Upstream API unreachable",
   });
+});
+
+it("proxies the detail lookup with the resolved event id", async () => {
+  getMock.mockResolvedValue({ data: { id: 7, title: "Base Builder Grants", sources: [] }, status: 200 });
+
+  const response = await GET(new Request("http://localhost/api/dashboard/opportunities/7"), {
+    params: Promise.resolve({ eventId: "7" }),
+  });
+
+  expect(getMock).toHaveBeenCalledWith("/api/v1/dashboard/opportunities/7");
+  expect(response.status).toBe(200);
+  await expect(response.json()).resolves.toMatchObject({ id: 7 });
 });
