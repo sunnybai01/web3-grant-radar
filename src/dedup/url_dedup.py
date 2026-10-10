@@ -2,43 +2,132 @@
 import hashlib
 import re
 from typing import Optional
-from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
+from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
 from sqlalchemy.orm import Session
 
-from src.db.queries import canonical_url_exists, insert_raw_signal
+from src.db.queries import insert_raw_signal, raw_signal_exists
 from src.fetchers.base import FetchedItem
 
-# Marketing/tracking params to strip
+# Marketing/tracking params to strip. Matched case-insensitively.
 TRACKING_PARAMS = {
-    "utm_source", "utm_medium", "utm_campaign", "utm_content",
-    "utm_term", "ref", "referrer", "source", "fbclid", "gclid",
-    "gclsrc", "dclid", "twclid", "msclkid", "_ga", "_gl",
+    "utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term",
+    "utm_id", "utm_name", "utm_reader", "utm_referrer",
+    "ref", "referrer", "referer", "source", "src", "ref_src", "ref_url",
+    "fbclid", "gclid", "gclsrc", "dclid", "twclid", "msclkid", "yclid",
+    "_ga", "_gl", "_hsenc", "_hsmi", "hsctatracking",
+    "mc_cid", "mc_eid", "mkt_tok", "igshid", "si", "trk", "trkCampaign",
+    "spm", "scm", "share_id", "shareId", "from", "via", "cmpid", "campaign",
 }
 
+# Hosts that serve the same page under both names. Only host-level rewrites that
+# are known to be safe belong here.
+_HOST_ALIASES = {
+    "twitter.com": "x.com",
+    "www.twitter.com": "x.com",
+    "mobile.twitter.com": "x.com",
+}
 
-def normalize_url(url: str) -> str:
-    """Strip tracking params, lowercase host, remove trailing slash, resolve known shortlinks."""
+_DEFAULT_PORTS = {"http": "80", "https": "443"}
+
+# Bare hostnames in scam/short-link lists would be premature; we only drop the
+# obvious non-web schemes.
+_ALLOWED_SCHEMES = {"http", "https"}
+
+
+def _normalized_host(parsed) -> str:
+    host = (parsed.hostname or "").lower()
+    if host.startswith("www.") and len(host) > 4:
+        host = host[4:]
+    host = _HOST_ALIASES.get(host, host)
+    port = parsed.port
+    if port is not None and str(port) != _DEFAULT_PORTS.get(parsed.scheme.lower(), ""):
+        host = f"{host}:{port}"
+    return host
+
+
+def _normalized_query(query: str) -> str:
+    if not query:
+        return ""
+    kept = [
+        (key, value)
+        for key, value in parse_qsl(query, keep_blank_values=True)
+        if key.lower() not in {p.lower() for p in TRACKING_PARAMS}
+    ]
+    kept.sort()
+    return urlencode(kept, doseq=True)
+
+
+def normalize_url(url: str, base_url: str = "") -> str:
+    """Canonicalize a URL for dedup comparisons.
+
+    Handles the variants that produced duplicate raw_signals in production:
+    scheme (http/https), leading ``www.``, default ports, tracking params,
+    parameter order, trailing slashes, fragments, relative paths and the
+    twitter.com/x.com pair. Returns "" for anything that is not a web URL.
+    """
     if not url:
         return ""
 
-    parsed = urlparse(url)
+    candidate = str(url).strip()
+    if base_url and not urlparse(candidate).netloc:
+        candidate = urljoin(base_url, candidate)
 
-    # Lowercase scheme and host
+    parsed = urlparse(candidate)
     scheme = parsed.scheme.lower()
-    netloc = parsed.hostname.lower() if parsed.hostname else ""
-    if parsed.port:
-        netloc = f"{netloc}:{parsed.port}"
 
-    # Remove fragment
-    path = parsed.path.rstrip("/") or "/"
+    if scheme not in _ALLOWED_SCHEMES:
+        if not parsed.netloc:
+            # "mailto:", "javascript:", "data:" and similar are not dedup keys.
+            return ""
+        scheme = "https"
 
-    # Filter tracking params
-    qs = parse_qs(parsed.query)
-    clean_qs = {k: v for k, v in qs.items() if k not in TRACKING_PARAMS}
-    query = urlencode(clean_qs, doseq=True)
+    # Force https: the same page served over both schemes produced two signals
+    # (with identical content hashes) in production.
+    scheme = "https"
 
-    return urlunparse((scheme, netloc, path, parsed.params, query, ""))
+    host = _normalized_host(parsed)
+    if not host:
+        return ""
+
+    path = parsed.path or "/"
+    if path != "/":
+        # Collapse duplicate slashes and drop the trailing one.
+        path = re.sub(r"/{2,}", "/", path).rstrip("/") or "/"
+
+    query = _normalized_query(parsed.query)
+
+    # Fragments are dropped: hash-routed pages ("/#/hackathon/123") otherwise
+    # collapse onto the bare host, which is worse than losing the anchor.
+    return urlunparse((scheme, host, path, "", query, ""))
+
+
+_WHITESPACE_RE = re.compile(r"[ \t\u00a0\u202f]+")
+_BLANK_LINES_RE = re.compile(r"\n{2,}")
+_ZERO_WIDTH_RE = re.compile(r"[\u200b-\u200d\ufeff]")
+_TIMESTAMP_RE = re.compile(
+    r"\b\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+-]\d{2}:?\d{2})?\b"
+)
+
+
+def normalize_content(content: str) -> str:
+    """Collapse the presentation-only noise that defeats content hashing.
+
+    Listing pages embed relative timestamps ("2 hours ago", "2026-10-10 01:04")
+    and copy-deck whitespace that change on every fetch while the opportunity
+    text stays identical. Two signals whose normalized forms match are the same
+    content as far as dedup is concerned.
+    """
+    if not content:
+        return ""
+
+    text = _ZERO_WIDTH_RE.sub("", str(content))
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = _TIMESTAMP_RE.sub(" ", text)
+    text = _WHITESPACE_RE.sub(" ", text)
+    text = "\n".join(line.strip() for line in text.split("\n"))
+    text = _BLANK_LINES_RE.sub("\n", text)
+    return text.strip()
 
 
 def generate_content_hash(content: str) -> str:
@@ -47,16 +136,24 @@ def generate_content_hash(content: str) -> str:
 
 
 def process_item_l1(db: Session, item: FetchedItem) -> Optional[int]:
-    """L1 dedup: canonical URL check. Returns raw_signal ID if new, None if duplicate.
+    """L1 dedup: canonical URL + content hash. Returns raw_signal ID if new, None if dup.
 
-    Writes to raw_signals table on success. PostgreSQL UNIQUE constraint on
-    canonical_url provides the final safety net.
+    Keyed on the pair rather than the URL alone: listing and index pages keep a
+    stable URL while their content rolls over, so a url-only key would silently
+    block every opportunity published after the first fetch. Near-identical
+    reposts are still caught downstream by L2 semantic dedup.
+
+    The hash is taken over the *normalized* content so a re-fetch that only moved
+    a timestamp or changed whitespace is recognised as the same signal instead of
+    being re-classified.
+
+    Writes to raw_signals table on success. The PostgreSQL UNIQUE constraint on
+    (canonical_url, content_hash) provides the final safety net.
     """
-    canonical = normalize_url(item.canonical_url or item.raw_url)
-    content_hash = generate_content_hash(item.raw_content)
+    canonical = normalize_url(item.canonical_url or item.raw_url, base_url=item.raw_url)
+    content_hash = generate_content_hash(normalize_content(item.raw_content))
 
-    # Quick URL dedup check
-    if canonical and canonical_url_exists(db, canonical):
+    if canonical and raw_signal_exists(db, canonical, content_hash):
         return None
 
     signal = insert_raw_signal(

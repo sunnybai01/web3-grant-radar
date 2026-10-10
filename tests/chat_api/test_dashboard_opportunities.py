@@ -67,6 +67,33 @@ def test_dashboard_opportunities_returns_metrics_and_items(monkeypatch) -> None:
     assert body["items"][0]["verification_verdict"] == "verified"
 
 
+def test_dashboard_opportunities_defaults_to_no_score_floor(monkeypatch) -> None:
+    client = TestClient(app)
+    captured = {}
+
+    def fake_list_opportunities(filters):
+        captured.update(filters)
+        return {
+            "metrics": {
+                "total_shown": 0,
+                "avg_score": 0.0,
+                "verified_percent": 0,
+                "grants": 0,
+                "hackathons": 0,
+                "official": 0,
+                "discovery": 0,
+            },
+            "items": [],
+        }
+
+    monkeypatch.setattr("src.chat_api.dashboard_service.list_opportunities", fake_list_opportunities)
+
+    resp = client.get("/api/v1/dashboard/opportunities")
+
+    assert resp.status_code == 200
+    assert captured["min_score"] == 0.0
+
+
 def test_dashboard_opportunity_delete_endpoint_removes_event(monkeypatch) -> None:
     client = TestClient(app)
 

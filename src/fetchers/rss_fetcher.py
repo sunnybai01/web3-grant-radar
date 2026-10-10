@@ -56,13 +56,13 @@ class RSSFetcher(BaseFetcher):
                 raw_content=raw_content,
                 raw_url=raw_url,
                 canonical_url=canonical,
-                metadata={
+                metadata=self._enrich({
                     "title": title,
                     "published": published,
                     "content_hash": content_hash,
                     "ecosystem": self.config.get("ecosystem"),
                     "category": self.config.get("category"),
-                },
+                }),
             ))
 
         return items

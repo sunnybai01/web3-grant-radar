@@ -50,10 +50,14 @@ services:
     ports:
       - "127.0.0.1:8001:8000"
     volumes:
-      - chroma_data:/chroma/chroma
+      # The server image persists under /data. The previous /chroma/chroma mount
+      # silently held a stale file from July: every vector indexed after a restart
+      # landed outside the volume, so L2 semantic dedup kept losing its history.
+      - chroma_data:/data
     environment:
       - IS_PERSISTENT=TRUE
       - ANONYMIZED_TELEMETRY=FALSE
+      - CHROMA_DB_IMPL=sqlite
 
 volumes:
   pgdata:

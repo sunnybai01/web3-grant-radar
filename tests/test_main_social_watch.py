@@ -11,6 +11,16 @@ from src.fetchers.base import FetchedItem
 from src.main import _persistable_event_data, _staleness_reason, run_pipeline
 
 
+def _iso(days_from_now: int) -> str:
+    """ISO timestamp relative to now.
+
+    run_pipeline reads the real clock, so hardcoded dates turn these tests into time
+    bombs — a literal "future" deadline silently becomes expired and the pipeline
+    starts dropping the fixture as stale.
+    """
+    return (datetime.now(timezone.utc) + timedelta(days=days_from_now)).isoformat()
+
+
 def test_main_declares_run_social_watch_wrapper() -> None:
     source = Path("src/main.py").read_text(encoding="utf-8")
     module = ast.parse(source)
@@ -208,7 +218,7 @@ def test_run_pipeline_keeps_valid_official_item(monkeypatch) -> None:
                 raw_url="https://x.com/gitcoin/status/1",
                 canonical_url="https://x.com/gitcoin/status/1",
                 metadata={
-                    "created_at": "2026-06-20T00:00:00+00:00",
+                    "created_at": _iso(-14),
                     "chain": "multi",
                     "source_tier": "official",
                     "official": True,
@@ -224,8 +234,8 @@ def test_run_pipeline_keeps_valid_official_item(monkeypatch) -> None:
                 "description": "Open round",
                 "ecosystem": "multi",
                 "application_url": "https://gitcoin.co",
-                "start_date": "2026-07-01T00:00:00+00:00",
-                "deadline": "2026-07-20T00:00:00+00:00",
+                "start_date": _iso(-3),
+                "deadline": _iso(17),
             }
 
     class PassThroughDeduplicator:
@@ -265,6 +275,167 @@ def test_run_pipeline_keeps_valid_official_item(monkeypatch) -> None:
     assert finished["items_new"] == 1
 
 
+def _discovery_item(now: datetime) -> FetchedItem:
+    return FetchedItem(
+        source_type="tavily_search",
+        source_name="tavily_sui_grants",
+        raw_content="hackathon",
+        raw_url="https://example.com/a",
+        canonical_url="https://example.com/a",
+        metadata={"created_at": (now - timedelta(days=2)).isoformat()},
+    )
+
+
+def test_staleness_reason_drops_title_whose_only_year_is_past() -> None:
+    """'ETHIndiaVilla 2025' seen in 2026 is last year's event, even if recently crawled."""
+    now = datetime(2026, 8, 4, tzinfo=timezone.utc)
+
+    assert _staleness_reason(
+        _discovery_item(now),
+        {"title": "ETHIndiaVilla 2025"},
+        source_tier="discovery",
+        now=now,
+    ) == "title_year_past"
+
+
+def test_staleness_reason_keeps_title_with_current_year() -> None:
+    now = datetime(2026, 8, 4, tzinfo=timezone.utc)
+
+    assert _staleness_reason(
+        _discovery_item(now),
+        {"title": "ETHGlobal New York 2026 Hackathon"},
+        source_tier="discovery",
+        now=now,
+    ) is None
+
+
+def test_staleness_reason_title_year_does_not_veto_a_future_deadline() -> None:
+    """An explicit open window outranks a stale-looking title."""
+    now = datetime(2026, 8, 4, tzinfo=timezone.utc)
+
+    assert _staleness_reason(
+        _discovery_item(now),
+        {"title": "2025 Builder Program", "deadline": "2026-09-01T00:00:00+00:00"},
+        source_tier="discovery",
+        now=now,
+    ) is None
+
+
+def test_staleness_reason_title_year_rule_applies_to_official_sources() -> None:
+    now = datetime(2026, 8, 4, tzinfo=timezone.utc)
+
+    assert _staleness_reason(
+        _discovery_item(now),
+        {"title": "ETHIndiaVilla 2025"},
+        source_tier="official",
+        now=now,
+    ) == "title_year_past"
+
+
+def test_staleness_reason_ignores_titles_without_years() -> None:
+    now = datetime(2026, 8, 4, tzinfo=timezone.utc)
+
+    assert _staleness_reason(
+        _discovery_item(now),
+        {"title": "Sui Overflow Hackathon"},
+        source_tier="discovery",
+        now=now,
+    ) is None
+
+
+def test_staleness_reason_drops_start_date_past_grace_without_deadline() -> None:
+    """ETHToronto 'running from July 26' with no deadline, seen 20 days later."""
+    now = datetime(2026, 8, 15, tzinfo=timezone.utc)
+
+    assert _staleness_reason(
+        _discovery_item(now),
+        {"title": "ETHToronto Hackathon", "start_date": "2026-07-26T00:00:00+00:00"},
+        source_tier="discovery",
+        now=now,
+    ) == "start_date_passed"
+
+
+def test_staleness_reason_keeps_recently_started_program() -> None:
+    """Inside the grace window a started program may still accept entries."""
+    now = datetime(2026, 8, 4, tzinfo=timezone.utc)
+
+    assert _staleness_reason(
+        _discovery_item(now),
+        {"title": "ETHToronto Hackathon", "start_date": "2026-07-31T00:00:00+00:00"},
+        source_tier="discovery",
+        now=now,
+    ) is None
+
+
+def test_run_pipeline_drops_results_announced_item(monkeypatch) -> None:
+    """A grant already awarded to a named project is not an actionable opportunity."""
+    fake_db = SimpleNamespace(close=lambda: None)
+    finished = {}
+    scraped = []
+
+    fake_fetcher = SimpleNamespace(config={"fetch_method": "twitter"})
+
+    class FakeRegistry:
+        _fetchers = {"twitter_gitcoin": fake_fetcher}
+
+        def fetch_all_with_status(self, schedule, should_skip=None):
+            item = FetchedItem(
+                source_type="twitter",
+                source_name="twitter_gitcoin",
+                raw_content="grant approved",
+                raw_url="https://x.com/avax/status/1",
+                canonical_url="https://x.com/avax/status/1",
+                metadata={
+                    "created_at": _iso(-1),
+                    "source_tier": "official",
+                    "official": True,
+                },
+            )
+            return [item], {"twitter_gitcoin": {"success": True, "error": None, "skipped": None}}
+
+    class FakeClassifier:
+        def classify(self, item):
+            return "GRANT", {
+                "title": "Avalanche Team1 Accelerator Grant for YourGrails",
+                "description": "The committee has approved a $30,000 grant for YourGrails.",
+                "opportunity_stage": "results_announced",
+                # Deliberately open: the gate must drop this on stage alone.
+                "deadline": _iso(120),
+            }
+
+    def _fail_if_called(*args, **kwargs):
+        scraped.append(args)
+        return None
+
+    monkeypatch.setattr("src.main.SessionLocal", lambda: fake_db)
+    monkeypatch.setattr("src.main.create_schedule_log", lambda db, name: SimpleNamespace(id=999))
+    monkeypatch.setattr(
+        "src.main.finish_schedule_log",
+        lambda db, log_id, **kwargs: finished.update({"log_id": log_id, **kwargs}),
+    )
+    monkeypatch.setattr("src.main.upsert_source_health", lambda *args, **kwargs: None)
+    monkeypatch.setattr("src.main.get_source_health", lambda *args, **kwargs: None)
+    monkeypatch.setattr("src.main.process_item_l1", lambda db, item: 123)
+    monkeypatch.setattr("src.main.increment_stat", lambda *args, **kwargs: None)
+    monkeypatch.setattr("src.main._try_extract_dates_from_url", _fail_if_called)
+    monkeypatch.setattr("src.main._init_components", lambda: None)
+    monkeypatch.setattr("src.main._fetcher_registry", FakeRegistry())
+    monkeypatch.setattr("src.main._classifier", FakeClassifier())
+    monkeypatch.setattr("src.main._slack", SimpleNamespace(is_configured=False, push_new_event=lambda e: None))
+
+    result = run_pipeline("social_watch")
+
+    assert result["status"] == "success"
+    assert result["classified"] == 1
+    assert result["unactionable"] == 1
+    # Dropped before dedup/verify/score, so nothing was created or pushed.
+    assert result["new"] == 0
+    assert result["verified"] == 0
+    assert result["pushed"] == 0
+    # The gate runs before the secondary date scrape, so no network call happened.
+    assert scraped == []
+
+
 def test_run_pipeline_keeps_official_item_even_without_start_date(monkeypatch) -> None:
     fake_db = SimpleNamespace(close=lambda: None)
     finished = {}
@@ -282,7 +453,7 @@ def test_run_pipeline_keeps_official_item_even_without_start_date(monkeypatch) -
                 raw_url="https://x.com/gitcoin/status/1",
                 canonical_url="https://x.com/gitcoin/status/1",
                 metadata={
-                    "created_at": "2026-07-02T00:00:00+00:00",
+                    "created_at": _iso(-2),
                     "chain": "multi",
                     "source_tier": "official",
                     "official": True,
@@ -298,7 +469,7 @@ def test_run_pipeline_keeps_official_item_even_without_start_date(monkeypatch) -
                 "description": "Open round",
                 "ecosystem": "multi",
                 "application_url": "https://gitcoin.co",
-                "deadline": "2026-07-20T00:00:00+00:00",
+                "deadline": _iso(17),
             }
 
     class PassThroughDeduplicator:
@@ -379,7 +550,7 @@ def test_run_pipeline_failure_finishes_schedule_log_with_error(monkeypatch) -> N
                 raw_url="https://x.com/gitcoin/status/1",
                 canonical_url="https://x.com/gitcoin/status/1",
                 metadata={
-                    "created_at": "2026-07-03T00:00:00+00:00",
+                    "created_at": _iso(-1),
                     "chain": "multi",
                     "source_tier": "official",
                     "official": True,
@@ -395,8 +566,8 @@ def test_run_pipeline_failure_finishes_schedule_log_with_error(monkeypatch) -> N
                 "description": "Open round",
                 "ecosystem": "multi",
                 "application_url": "https://gitcoin.co",
-                "start_date": "2026-07-01T00:00:00+00:00",
-                "deadline": "2026-07-20T00:00:00+00:00",
+                "start_date": _iso(-3),
+                "deadline": _iso(17),
             }
 
     class FailingDeduplicator:
@@ -422,8 +593,45 @@ def test_run_pipeline_failure_finishes_schedule_log_with_error(monkeypatch) -> N
 
     result = run_pipeline("social_watch")
 
+    # A failure inside one item is isolated: the run still succeeds, the item is
+    # counted as an error (so a systematic breakage is visible), and the rest of
+    # the batch is processed.
+    assert result["status"] == "success"
+    assert result["item_errors"] == 1
+    assert result["new"] == 0
+    assert finished["log_id"] == 999
+    assert "error" not in finished
+
+
+def test_run_pipeline_reports_run_level_failure(monkeypatch) -> None:
+    """Infrastructure failures (not per-item ones) still fail the run."""
+    fake_db = SimpleNamespace(close=lambda: None)
+    finished = {}
+
+    class ExplodingRegistry:
+        _fetchers = {"twitter_gitcoin": SimpleNamespace(config={"fetch_method": "twitter"})}
+
+        def fetch_all_with_status(self, schedule, should_skip=None):
+            raise RuntimeError("fetcher registry unavailable")
+
+    monkeypatch.setattr("src.main.SessionLocal", lambda: fake_db)
+    monkeypatch.setattr("src.main.create_schedule_log", lambda db, name: SimpleNamespace(id=999))
+    monkeypatch.setattr(
+        "src.main.finish_schedule_log",
+        lambda db, log_id, **kwargs: finished.update({"log_id": log_id, **kwargs}),
+    )
+    monkeypatch.setattr("src.main.get_source_health", lambda *args, **kwargs: None)
+    monkeypatch.setattr("src.main.select_budgeted_sources", lambda *args, **kwargs: set())
+    monkeypatch.setattr("src.main.increment_stat", lambda *args, **kwargs: None)
+    monkeypatch.setattr("src.main._init_components", lambda: None)
+    monkeypatch.setattr("src.main._reconcile_vector_index_once", lambda: None)
+    monkeypatch.setattr("src.main._fetcher_registry", ExplodingRegistry())
+    monkeypatch.setattr("src.main._slack", SimpleNamespace(is_configured=False))
+
+    result = run_pipeline("social_watch")
+
     assert result["status"] == "failed"
-    assert "invalid keyword argument" in result["error"]
+    assert "fetcher registry unavailable" in result["error"]
     assert finished["log_id"] == 999
     assert finished["error"] == result["error"]
 

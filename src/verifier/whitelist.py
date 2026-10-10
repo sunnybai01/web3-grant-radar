@@ -10,6 +10,12 @@ from .whitelist_data import OFFICIAL_DOMAINS, OFFICIAL_TWITTER_HANDLES
 
 logger = logging.getLogger(__name__)
 
+# Twitter handles are stored with their canonical casing ("ETHGlobal", "EF_ESP")
+# while source names are lowercased ("twitter_ethglobal"). Comparing them
+# case-sensitively labelled seven legitimate official accounts as degraded
+# forever, so both sides are casefolded.
+_FOLDED_HANDLES = {h.casefold() for h in OFFICIAL_TWITTER_HANDLES}
+
 
 def check_domain(url: str) -> tuple[bool, str]:
     """Check if a URL's domain is in the official whitelist.
@@ -49,7 +55,7 @@ def check_twitter_handle(handle: str) -> tuple[bool, str]:
         return False, "no_handle_provided"
 
     clean = handle.lstrip("@").strip()
-    if clean in OFFICIAL_TWITTER_HANDLES:
+    if clean.casefold() in _FOLDED_HANDLES:
         return True, f"twitter_handle_match:{clean}"
 
     return False, f"twitter_handle_not_in_whitelist:{clean}"

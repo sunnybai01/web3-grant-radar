@@ -125,6 +125,7 @@ class DashboardOpportunityItem(BaseModel):
     source_trust: str
     verification_verdict: str
     apply_url: str
+    is_dismissed: bool = False
 
 
 class DashboardOpportunityMetrics(BaseModel):
@@ -146,6 +147,12 @@ class DeleteOpportunityResponse(BaseModel):
     status: str
     event_id: int
     deleted: bool
+
+
+class DismissEventResponse(BaseModel):
+    status: str
+    event_id: int
+    is_dismissed: bool
 
 
 class DashboardSourceHealthItem(BaseModel):

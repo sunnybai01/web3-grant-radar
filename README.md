@@ -35,11 +35,12 @@
 
 ## 3. 机会信息获取流程
 
-当前机会抓取由 `grant_hackathon`、`bounty`、`social_watch` 三类 schedule 触发，统一进入 `run_pipeline()` 主链路。
+当前机会抓取由 `grant_hackathon`、`social_watch` 两类 schedule 触发，统一进入 `run_pipeline()` 主链路。
+（`bounty` 已下线：调度不注册，分类器也会把 BOUNTY 判为 NOISE，见第 15 节。）
 
 ```mermaid
 flowchart TD
-  A[APScheduler 触发任务\ngrant_hackathon / bounty / social_watch] --> B[run_pipeline schedule]
+  A[APScheduler 触发任务\ngrant_hackathon / social_watch] --> B[run_pipeline schedule]
   B --> C[加载 source 配置\nconfig/sources.yaml\n+ optional approved chains.candidates.yaml]
   C --> D[build_registry\n按 fetch_method 注册 Fetcher]
   D --> E[抓取前裁剪\n按 schedule 过滤 source\nTavily budget 选择\n冷却/失败 source 跳过]
@@ -50,7 +51,7 @@ flowchart TD
   I --> J{是否为新链接}
   J -->|否| K[丢弃重复项]
   J -->|是| L[关键词粗筛\nKeywordFilter]
-  L --> M[LLM 分类与结构化抽取\nGRANT / HACKATHON / BOUNTY / NOISE]
+  L --> M[LLM 分类与结构化抽取\nGRANT / HACKATHON / NOISE（BOUNTY 视为 NOISE）]
   M --> N{是否为有效机会}
   N -->|否| O[丢弃噪音]
   N -->|是| P[时效过滤\n发布时间超过 7 天\n或 deadline 已过则跳过]
@@ -98,10 +99,16 @@ cp .env.example .env
 - 运行：`LOG_LEVEL` `HEARTBEAT_INTERVAL_MINUTES` `SOCIAL_WATCH_INTERVAL_MINUTES` `TWITTER_FETCH_COUNT`
 - 每日汇总：`DAILY_SUMMARY_ENABLED` `DAILY_SUMMARY_CRON`
 
-当前 Tavily 默认值：
+当前 Tavily 默认值（代码默认与本节一致，可用环境变量覆盖）：
 
 - `TAVILY_SUCCESS_COOLDOWN_MINUTES=5760`：同一个 Tavily source 成功执行后，4 天内不重复搜索
 - `TAVILY_MAX_SOURCES_PER_RUN=1`：每个 schedule 每轮最多只执行 1 个 Tavily source，按“最久未抓取优先”轮转
+- 另有一层“当日已成功则锁到次日 00:00（Asia/Shanghai）”的保护，由 `tavily_unlock` job 释放
+
+其它运行保护：
+
+- `FAILURE_COOLDOWN_MINUTES=720`：source 进入 `down` 后的基础退避，按连续失败次数指数增长，上限 `FAILURE_COOLDOWN_MAX_MINUTES=10080`
+- `LLM_TIMEOUT_SECONDS=60` / `LLM_MAX_RETRIES=1`：单次 LLM 请求的超时与重试预算（不再使用 SDK 默认的 600s×3）
 
 当前 DefiLlama 链路默认值：
 
@@ -144,17 +151,19 @@ docker compose up -d --force-recreate agent-app
 
 ## 7. 调度策略（Asia/Shanghai）
 
-- `grant_hackathon`：每天 09:00、21:00
-- `bounty`：每 2 小时
+调度的唯一事实来源是 `src/scheduler/jobs.py`（`config/sources.yaml` 里的 `schedules:` 段只是说明，不被代码读取）。
+
+- `grant_hackathon`：每天 09:00、21:00（`GRANT_HACKATHON_SCHEDULE = "0 9,21 * * *"`）
 - `social_watch`：每 `SOCIAL_WATCH_INTERVAL_MINUTES` 分钟
 - `heartbeat`：每 `HEARTBEAT_INTERVAL_MINUTES` 分钟
 - `daily_summary`：每天按 `DAILY_SUMMARY_CRON` 发送 Slack 日报（默认 23:55，Asia/Shanghai）
-- `defillama_candidate_sync`：默认不注册；仅当 `DEFILLAMA_SYNC_ENABLED=true` 时按 `DEFILLAMA_SYNC_CRON` 注册
+- `tavily_unlock`：每天 00:00 释放 Tavily 冷却
+
+`bounty` 调度不注册，bounty 类机会也不进 pipeline（见第 15 节说明）。
 
 启动时会先立即跑一次：
 
 - grant_hackathon
-- bounty
 - social_watch
 - heartbeat
 
@@ -164,11 +173,16 @@ Twitter 说明：
 - 仓库内置的 Twitter sources 默认保持禁用，避免在未配置 X 登录态时让启动自检失败。
 - `official` Twitter sources 会直入主 pipeline；`discovery` Twitter sources 会先经过预处理降噪。
 
-时效性清洗说明：
+时效性清洗说明（实现见 `src/main.py::_staleness_reason`）：
 
-- 发布时间超过 7 天的候选会在分类后、入库前被跳过
-- 已经过了 `deadline` 的候选会被跳过
-- Twitter 抓取会透传 tweet `created_at`，用于这层时效过滤
+- 有 `deadline` 且已过期 → 丢弃
+- 无 `deadline` 且标题里的年份全是过去年份 → 丢弃
+- discovery 源（非 `official`）：起始日期超过 `STALE_START_DATE_GRACE_DAYS`（默认 14 天）且无 deadline → 丢弃
+- discovery 源：既无发布时间也无 deadline → 丢弃（判为无法确认时效）
+- discovery 源：发布时间超过 `STALE_MAX_AGE_DAYS`（默认 60 天）且无 deadline → 丢弃
+- `official` 源（`source_tier: official`）不会因为时效被丢弃（视为滚动开放），除非 deadline 已过期
+
+Twitter 抓取会透传 tweet `created_at`，用于这层时效过滤。
 
 ## 8. Slack 与报告行为
 
@@ -311,7 +325,7 @@ Current importer behavior also filters a small set of obvious non-target chains 
 
 - `chain`: canonical ecosystem id
 - `source_tier`: `official` or `discovery`
-- `signal_type`: `grant`, `hackathon`, `bounty`, `social`, or `discovery`
+- `signal_type`: `grant`, `hackathon`, `social`, or `discovery`
 - `official`: trust hint for downstream verification
 
 Existing entries do not need to be rewritten immediately. The loader in `src/fetchers/builder.py` backfills these fields automatically from `ecosystem`, `category`, and `fetch_method` so migration can happen incrementally.

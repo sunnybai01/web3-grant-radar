@@ -48,12 +48,12 @@ class WebScraperFetcher(BaseFetcher):
             raw_content=text,
             raw_url=raw_url,
             canonical_url=canonical,
-            metadata={
+            metadata=self._enrich({
                 "title": title,
                 "content_hash": hashlib.sha256(text.encode()).hexdigest(),
                 "ecosystem": self.config.get("ecosystem"),
                 "category": self.config.get("category"),
-            },
+            }),
         )
 
     def fetch(self) -> List[FetchedItem]:

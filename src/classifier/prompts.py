@@ -12,6 +12,18 @@ Categories:
 - "HACKATHON": Hackathon, buildathon, code sprint, game jam, hacker house, demo day, pitch competition
 - "NOISE": Not an in-scope opportunity (e.g., bug bounty / security bounty programs, marketing hype, airdrop announcement, general news, NFT mint, token sale)
 
+Separately from the category, judge whether a reader could still act on this today.
+Report it as opportunity_stage:
+- "open": applications/registration are open right now, or the program accepts submissions on a rolling basis
+- "upcoming": announced but not yet open; a future start date is stated or implied
+- "closed": the application or registration window has already passed
+- "results_announced": this reports an outcome, not a call for participants — winners, finalists,
+  selected teams, a concluded round, or a grant already awarded to a named recipient
+
+Judge the stage from what the content actually says, not from the category. Content that reads
+like "X has approved a grant for <specific project>", "top N finalists announced", or "the round
+has concluded" is "results_announced" even when it is clearly about a grant or hackathon.
+
 For GRANT/HACKATHON, extract all structured fields below. For NOISE, return only the category."""
 
 CLASSIFY_USER_TEMPLATE = """Analyze this content and determine if it describes a Web3 funding opportunity.
@@ -24,6 +36,7 @@ Source: {source_name} ({source_type})
 
 Return JSON with these fields:
 - category: "GRANT" | "HACKATHON" | "NOISE"
+- opportunity_stage: "open" | "upcoming" | "closed" | "results_announced"
 - title: a clean, concise title for this opportunity (max 200 chars)
 - description: 2-3 sentence summary (max 500 chars)
 - start_date: ISO 8601 date when applications/registration opens or the program starts, or null if not found
@@ -81,6 +94,10 @@ EXTRACTION_SCHEMA = {
         "category": {
             "type": "string",
             "enum": ["GRANT", "HACKATHON", "NOISE"],
+        },
+        "opportunity_stage": {
+            "type": "string",
+            "enum": ["open", "upcoming", "closed", "results_announced"],
         },
         "title": {"type": "string", "maxLength": 200},
         "description": {"type": "string", "maxLength": 500},

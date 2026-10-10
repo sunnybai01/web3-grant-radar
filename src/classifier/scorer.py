@@ -52,30 +52,82 @@ class OpportunityScorer:
 
         result = self.llm.classify_structured(SCORE_SYSTEM, prompt)
 
-        if result and all(k in result for k in ["score_roi", "score_reputation",
-                                                  "score_timeliness", "score_strategy"]):
-            # Compute weighted final score
-            final = (
-                result["score_roi"] * self.WEIGHTS["roi"]
-                + result["score_reputation"] * self.WEIGHTS["reputation"]
-                + result["score_timeliness"] * self.WEIGHTS["timeliness"]
-                + result["score_strategy"] * self.WEIGHTS["strategy"]
-            )
-            event_data["score_roi"] = result["score_roi"]
-            event_data["score_reputation"] = result["score_reputation"]
-            event_data["score_timeliness"] = result["score_timeliness"]
-            event_data["score_strategy"] = result["score_strategy"]
-            event_data["final_score"] = round(final, 2)
+        dimensions = self._extract_dimensions(result)
+        if dimensions is not None:
+            event_data.update(dimensions)
+            event_data["final_score"] = self._weighted_total(dimensions)
             return self._apply_trust_adjustments(event_data)
 
         # Fallback: heuristic scoring
         logger.warning("LLM scoring failed, using heuristic fallback")
         return self._heuristic_score(event_data)
 
+    @staticmethod
+    def _coerce_score(value) -> Optional[float]:
+        """Parse one model-supplied dimension score, or None when unusable."""
+        if isinstance(value, bool) or value is None:
+            return None
+        if isinstance(value, (int, float)):
+            return float(value)
+        if isinstance(value, str):
+            try:
+                return float(value.strip())
+            except ValueError:
+                return None
+        return None
+
+    def _extract_dimensions(self, result) -> Optional[Dict[str, float]]:
+        """Validate and clamp all four dimensions, or return None to fall back.
+
+        The old check only tested key presence and then multiplied, so a null or
+        string score raised a TypeError that aborted the whole run, and an
+        out-of-range value (80) was stored as-is and produced a final_score of
+        48.0 while the dashboard still rendered it as a normal score.
+        """
+        if not isinstance(result, dict) or not result:
+            return None
+
+        mapping = {
+            "score_roi": "score_roi",
+            "score_reputation": "score_reputation",
+            "score_timeliness": "score_timeliness",
+            "score_strategy": "score_strategy",
+        }
+        dimensions: Dict[str, float] = {}
+        for key in mapping:
+            if key not in result:
+                logger.warning("Scoring response missing %s — using heuristic fallback", key)
+                return None
+            raw = self._coerce_score(result[key])
+            if raw is None:
+                logger.warning("Scoring response has unusable %s=%r — clamped out", key, result[key])
+                continue
+            if raw < 1.0 or raw > 10.0:
+                logger.warning("Scoring response %s=%s outside 1-10 — clamped", key, raw)
+            dimensions[key] = round(self._clamp_score(raw), 1)
+
+        # A dimension we could not read at all falls back to the neutral midpoint
+        # rather than dropping the whole scoring result.
+        for key in mapping:
+            dimensions.setdefault(key, 5.0)
+
+        return dimensions
+
+    def _weighted_total(self, dimensions: Dict[str, float]) -> float:
+        total = (
+            dimensions["score_roi"] * self.WEIGHTS["roi"]
+            + dimensions["score_reputation"] * self.WEIGHTS["reputation"]
+            + dimensions["score_timeliness"] * self.WEIGHTS["timeliness"]
+            + dimensions["score_strategy"] * self.WEIGHTS["strategy"]
+        )
+        return round(total, 2)
+
     def _heuristic_score(self, event_data: Dict[str, Any]) -> Dict[str, Any]:
         """Basic heuristic scoring when LLM fails."""
         amount = event_data.get("amount", "") or ""
-        event_type = event_data.get("event_type", "")
+        # event_type is stored lowercase ("grant"); compare case-insensitively so
+        # these branches are actually reachable.
+        event_type = str(event_data.get("event_type") or "").upper()
         ecosystem = event_data.get("ecosystem", "") or ""
 
         # ROI heuristic: try to parse amount
@@ -171,6 +223,10 @@ class OpportunityScorer:
         if verification_verdict == "degraded":
             strategy -= self.DEGRADED_STRATEGY_PENALTY
 
+        event_data["score_roi"] = round(self._clamp_score(float(event_data.get("score_roi") or 0.0)), 1)
+        event_data["score_timeliness"] = round(
+            self._clamp_score(float(event_data.get("score_timeliness") or 0.0)), 1
+        )
         event_data["score_reputation"] = round(self._clamp_score(reputation), 1)
         event_data["score_strategy"] = round(self._clamp_score(strategy), 1)
         event_data["official"] = official
@@ -182,7 +238,7 @@ class OpportunityScorer:
             + event_data["score_timeliness"] * self.WEIGHTS["timeliness"]
             + event_data["score_strategy"] * self.WEIGHTS["strategy"]
         )
-        event_data["final_score"] = round(final, 2)
+        event_data["final_score"] = round(self._clamp_score(final), 2)
         return event_data
 
     @staticmethod

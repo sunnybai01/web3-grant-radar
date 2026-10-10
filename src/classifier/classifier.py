@@ -1,8 +1,7 @@
 """Classification orchestrator — keyword filter → LLM classify → structured extraction."""
 import logging
+from dataclasses import dataclass, field
 from typing import Optional, Dict, Any, Tuple
-
-from sqlalchemy.orm import Session
 
 from src.fetchers.base import FetchedItem
 from .keyword_filter import KeywordFilter
@@ -10,6 +9,39 @@ from .llm_gateway import LLMGateway
 from .prompts import CLASSIFY_SYSTEM, CLASSIFY_USER_TEMPLATE
 
 logger = logging.getLogger(__name__)
+
+# Categories the pipeline accepts. Anything else (including the intentionally
+# out-of-scope BOUNTY) is treated as noise, but only after case normalisation.
+ACCEPTED_CATEGORIES = {"GRANT", "HACKATHON"}
+OUT_OF_SCOPE_CATEGORIES = {"BOUNTY"}
+
+
+@dataclass
+class Classification:
+    """Outcome of classifying one item.
+
+    ``category`` is "GRANT"/"HACKATHON" for a real opportunity, "NOISE" when the
+    content genuinely is not an opportunity, and None only when we could not
+    decide (LLM failure, unusable output). Keeping those last two apart matters:
+    the old API returned None for both, so a provider outage was indistinguishable
+    from "nothing found here" and whole runs silently reported zero opportunities.
+    """
+
+    category: Optional[str] = None
+    data: Optional[Dict[str, Any]] = None
+    llm_error: Optional[str] = None
+
+    def __iter__(self):
+        """Allow (category, data) unpacking, the shape this API used to return."""
+        return iter((self.category, self.data))
+
+    @property
+    def is_opportunity(self) -> bool:
+        return self.category in ACCEPTED_CATEGORIES and self.data is not None
+
+    @property
+    def failed(self) -> bool:
+        return self.llm_error is not None
 
 
 class OpportunityClassifier:
@@ -25,52 +57,95 @@ class OpportunityClassifier:
         self.keywords = keyword_filter
         self.llm = llm_gateway
 
-    def classify(self, item: FetchedItem) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
+    # -- helpers ------------------------------------------------------------
+
+    @staticmethod
+    def _coerce_confidence(value) -> Optional[float]:
+        """Parse a model-supplied confidence defensively.
+
+        The model returns JSON, so confidence occasionally arrives as a string
+        or with an unexpected shape; comparing that to a float used to raise and
+        abort the entire run.
+        """
+        if value is None:
+            return None
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, (int, float)):
+            return float(value)
+        if isinstance(value, str):
+            try:
+                return float(value.strip())
+            except ValueError:
+                return None
+        return None
+
+    # -- main entry point ---------------------------------------------------
+
+    def classify(self, item: FetchedItem) -> Classification:
         """Classify a single fetched item.
 
-        Returns (category, structured_data).
-        - category: "GRANT" | "HACKATHON" | "NOISE" | None (on error)
-        - structured_data: full extracted event dict, or None
+        Returns a Classification. Callers must check ``failed`` before treating a
+        non-opportunity as "the content was noise".
         """
         # Stage 1: keyword coarse filter
         if not self.keywords.matches(item.raw_content):
-            return "NOISE", None
+            return Classification(category="NOISE")
 
         # Stage 2: LLM fine classification + extraction
         user_prompt = CLASSIFY_USER_TEMPLATE.format(
-            title=item.metadata.get("title", "")[:300],
+            title=(item.metadata or {}).get("title", "")[:300],
             content=item.raw_content[:3000],
             source_name=item.source_name,
             source_type=item.source_type,
         )
 
-        result = self.llm.classify_structured(CLASSIFY_SYSTEM, user_prompt)
-        if not result:
-            return None, None
+        try:
+            result = self.llm.classify_structured(CLASSIFY_SYSTEM, user_prompt)
+        except Exception as e:
+            logger.error("Classification call raised for %s: %s", item.source_name, e)
+            return Classification(llm_error=f"exception:{e}")
 
-        category = result.get("category", "NOISE")
-        confidence = result.get("confidence", 0.0)
+        if not isinstance(result, dict) or not result:
+            return Classification(llm_error="empty_or_non_object_response")
+
+        raw_category = result.get("category")
+        if not isinstance(raw_category, str) or not raw_category.strip():
+            return Classification(llm_error="missing_category", data=result)
+
+        category = raw_category.strip().upper()
 
         # Bounty opportunities are intentionally out of scope — drop them so no
         # new bounty events are ever created, even if the LLM still emits BOUNTY.
-        if category == "BOUNTY":
-            return "NOISE", None
+        if category in OUT_OF_SCOPE_CATEGORIES:
+            return Classification(category="NOISE")
 
-        if category == "NOISE" or confidence < self.CONFIDENCE_THRESHOLD:
-            return "NOISE", None
+        if category not in ACCEPTED_CATEGORIES:
+            # Includes "NOISE" and any unexpected label such as "FELLOWSHIP".
+            return Classification(category="NOISE", data=result)
+
+        confidence = self._coerce_confidence(result.get("confidence"))
+        if confidence is None:
+            # The schema does not require confidence, and the prompt only asks for
+            # it. Treating a missing value as 0.0 silently discarded opportunities,
+            # so an absent score is treated as "the model did not object".
+            logger.debug("No usable confidence for %s; accepting classification", item.source_name)
+            confidence = 1.0
+
+        if confidence < self.CONFIDENCE_THRESHOLD:
+            return Classification(category="NOISE", data=result)
 
         # Merge ecosystem/category hints from source config
+        metadata = item.metadata or {}
         if not result.get("ecosystem"):
-            result["ecosystem"] = item.metadata.get("ecosystem")
+            result["ecosystem"] = metadata.get("ecosystem")
 
-        return category, result
+        result["category"] = category
+        result["confidence"] = confidence
+        return Classification(category=category, data=result)
 
     def classify_batch(
         self, items: list[FetchedItem]
-    ) -> list[Tuple[FetchedItem, Optional[str], Optional[Dict[str, Any]]]]:
-        """Classify a batch. Returns list of (item, category, structured_data)."""
-        results = []
-        for item in items:
-            category, data = self.classify(item)
-            results.append((item, category, data))
-        return results
+    ) -> list[Tuple[FetchedItem, Classification]]:
+        """Classify a batch. Returns list of (item, Classification)."""
+        return [(item, self.classify(item)) for item in items]

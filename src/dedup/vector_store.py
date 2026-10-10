@@ -10,6 +10,15 @@ from config.settings import settings
 logger = logging.getLogger(__name__)
 
 
+class VectorStoreError(RuntimeError):
+    """Raised when the vector store cannot index or query.
+
+    Dedup silently degrading into "everything is new" was one of the ways
+    duplicate Events were created while the run still reported success, so
+    index/query failures are surfaced instead of being swallowed.
+    """
+
+
 class VectorStore:
     """Thin wrapper around ChromaDB for embedding storage and similarity search."""
 
@@ -26,16 +35,35 @@ class VectorStore:
             metadata={"hnsw:space": "cosine"},
         )
 
-    def add(self, doc_id: str, text: str, metadata: Optional[dict] = None):
-        """Index an event's text for later similarity search."""
+    def count(self) -> int:
+        """Number of indexed documents. Raises VectorStoreError when unreachable."""
         try:
-            self._collection.add(
+            return int(self._collection.count())
+        except Exception as e:
+            raise VectorStoreError(f"ChromaDB count failed: {e}") from e
+
+    def existing_ids(self) -> set[str]:
+        """All document ids currently indexed (used for reconciliation)."""
+        try:
+            result = self._collection.get(include=[])
+        except Exception as e:
+            raise VectorStoreError(f"ChromaDB get failed: {e}") from e
+        return set(result.get("ids") or [])
+
+    def add(self, doc_id: str, text: str, metadata: Optional[dict] = None):
+        """Index an event's text for later similarity search.
+
+        Upsert semantics: re-indexing an already present id refreshes it instead
+        of failing, so the startup reconciliation can be run repeatedly.
+        """
+        try:
+            self._collection.upsert(
                 ids=[doc_id],
                 documents=[text],
                 metadatas=[metadata or {}],
             )
         except Exception as e:
-            logger.error(f"ChromaDB add failed for {doc_id}: {e}")
+            raise VectorStoreError(f"ChromaDB add failed for {doc_id}: {e}") from e
 
     def search_similar(
         self,
@@ -46,6 +74,8 @@ class VectorStore:
         """Return (id, distance, metadata) tuples for similar documents.
 
         Uses cosine similarity. Lower distance = more similar.
+        Raises VectorStoreError on failure so a broken index is never mistaken
+        for "no duplicates found".
         """
         try:
             results = self._collection.query(
@@ -55,8 +85,7 @@ class VectorStore:
                 include=["metadatas", "distances"],
             )
         except Exception as e:
-            logger.error(f"ChromaDB search failed: {e}")
-            return []
+            raise VectorStoreError(f"ChromaDB search failed: {e}") from e
 
         if not results["ids"] or not results["ids"][0]:
             return []
@@ -84,7 +113,7 @@ class VectorStore:
             self._collection.delete(ids=doc_ids)
             logger.info(f"ChromaDB batch delete: {len(doc_ids)} vectors removed")
         except Exception as e:
-            logger.error(f"ChromaDB batch delete failed: {e}")
+            raise VectorStoreError(f"ChromaDB batch delete failed: {e}") from e
 
     def clear_all(self):
         """Drop and recreate the collection, removing all vectors."""

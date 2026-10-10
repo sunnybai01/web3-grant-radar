@@ -41,7 +41,7 @@ sources:
 
   - name: optimism_rpgf
     type: rss
-    url: https://gov.optimism.io/c/retropgf/61.rss
+    url: https://gov.optimism.io/c/grants/87.rss
     schedule: grant_hackathon
     category: grant
     ecosystem: optimism
@@ -67,7 +67,7 @@ sources:
 
   - name: solana_foundation
     type: rss
-    url: https://solana.com/rss
+    url: https://solana.com/news/rss.xml
     schedule: grant_hackathon
     category: grant
     ecosystem: solana
@@ -102,16 +102,17 @@ sources:
     source_tier: official
     signal_type: grant
     official: true
-    enabled: true
+    # disabled 2026-08-20: RSS feed removed (blog has no feed; /village and /grants are JS-only). Covered by tavily_polygon_grants + twitter_polygon.
+    enabled: false
 
   - name: starknet_foundation
-    type: rss
-    url: https://starkware.co/blog/feed
+    type: web_scraper
+    url: https://www.starknet.io/grants
     schedule: grant_hackathon
     category: grant
     ecosystem: starknet
     chain: starknet
-    fetch_method: rss
+    fetch_method: web_scraper
     source_tier: official
     signal_type: grant
     official: true
@@ -155,7 +156,8 @@ sources:
     signal_type: grant
     official: true
     rate_limit_cooldown_minutes: 1440
-    enabled: true
+    # disabled 2026-08-20: Whole domain sits behind a Vercel bot challenge (429, x-vercel-mitigated). Covered by tavily_aptos_grants + twitter_aptosfoundation.
+    enabled: false
 
   - name: stellar_community_fund
     type: rss
@@ -432,7 +434,8 @@ sources:
     source_tier: official
     signal_type: grant
     official: true
-    enabled: true
+    # disabled 2026-08-20: Page gone — near.foundation/grants 404s and near.org paths are soft-404s. Covered by tavily_near_grants + twitter_near.
+    enabled: false
 
   - name: base_ecosystem_fund
     type: web_scraper
@@ -991,7 +994,8 @@ sources:
     ingestion_mode: direct
     source_kind: account
     watch_priority: high
-    enabled: true
+    # disabled 2026-08-20: Handle no longer exists (verified against a known-bad control handle).
+    enabled: false
 
   - name: twitter_aave
     type: twitter

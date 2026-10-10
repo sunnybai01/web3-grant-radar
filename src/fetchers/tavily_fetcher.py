@@ -124,7 +124,7 @@ class TavilyFetcher(BaseFetcher):
                 raw_content=raw_content,
                 raw_url=raw_url,
                 canonical_url=canonical,
-                metadata={
+                metadata=self._enrich({
                     "title": title,
                     "platform": "tavily",
                     "content_hash": hashlib.sha256(raw_content.encode()).hexdigest(),
@@ -133,7 +133,7 @@ class TavilyFetcher(BaseFetcher):
                     "tavily_score": result.get("score"),
                     "published_date": result.get("published_date"),
                     "query": query,
-                },
+                }),
             ))
 
         return items

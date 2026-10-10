@@ -65,25 +65,30 @@ def test_send_daily_summary_posts_message(monkeypatch) -> None:
                 "by_source_type": {"twitter": 1, "rss": 1},
             },
             "historical_high_score": {
-                "threshold": 7.0,
-                "total_count": 3,
-                "by_event_type": {"grant": 2, "bounty": 1},
+                "total_count": 2,
+                "by_event_type": {"grant": 1, "hackathon": 1},
                 "recent_events": [
                     {
+                        "id": 1,
                         "event_type": "grant",
                         "title": "Base Builder Rewards",
                         "final_score": 7.8,
+                        "amount": "$50,000",
+                        "deadline": "2026-07-30",
                         "source_type": "twitter",
                         "source_name": "twitter_buildonbase",
                         "source_url": "https://x.com/buildonbase/status/1",
                     },
                     {
-                        "event_type": "bounty",
-                        "title": "Arbitrum Security Bounty",
+                        "id": 2,
+                        "event_type": "hackathon",
+                        "title": "ETHGlobal New York",
                         "final_score": 8.6,
+                        "amount": "",
+                        "deadline": "",
                         "source_type": "rss",
-                        "source_name": "immunefi_rss",
-                        "source_url": "https://immunefi.com/bounty/arb",
+                        "source_name": "ethglobal_rss",
+                        "source_url": "https://ethglobal.com/events/ny",
                     },
                 ],
             },
@@ -91,9 +96,12 @@ def test_send_daily_summary_posts_message(monkeypatch) -> None:
             "new_event_sources": ["twitter_buildonbase"],
             "new_events": [
                 {
+                    "id": 1,
                     "event_type": "grant",
                     "title": "Base Builder Rewards",
                     "final_score": 7.8,
+                    "amount": "$50,000",
+                    "deadline": "2026-07-30",
                     "source_type": "twitter",
                     "source_name": "twitter_buildonbase",
                     "source_url": "https://x.com/buildonbase/status/1",
@@ -102,14 +110,85 @@ def test_send_daily_summary_posts_message(monkeypatch) -> None:
         }
     )
 
+    text = sent["text"]
+
     assert ts == "123.456"
     assert sent["channel"] == "C123"
-    assert "Daily Summary" in sent["text"]
-    assert "twitter_buildonbase" in sent["text"]
-    assert "<https://x.com/buildonbase/status/1|Base Builder Rewards>" in sent["text"]
-    assert "| Source: Twitter" in sent["text"]
-    assert "Today's new content stats" in sent["text"]
-    assert "By event type: grant: 1, bounty: 1" in sent["text"]
-    assert "Historical opportunities: 3" in sent["text"]
-    assert "- [BOUNTY] <https://immunefi.com/bounty/arb|Arbitrum Security Bounty> | Score: 8.6 | Source: Rss" in sent["text"]
-    assert "<https://x.com/buildonbase/status/1|twitter_buildonbase>" not in sent["text"]
+    assert "Daily Summary · 2026-07-06" in text
+
+    # One table, score-sorted: 8.6 outranks 7.8 even though it was passed second.
+    assert "SCORE" in text and "DEADLINE" in text
+    body = [line for line in text.splitlines() if "ETHGlobal" in line or "Base Builder" in line]
+    assert body[0].strip().startswith("1")
+    assert "ETHGlobal New York" in body[0]
+    assert "8.6" in body[0]
+    assert body[1].strip().startswith("2")
+    assert "Base Builder Rewards" in body[1]
+    assert "$50,000" in body[1]
+    assert "2026-07-30" in body[1]
+    # Missing amount/deadline degrade to placeholders, never to "None".
+    assert "Rolling" in body[0]
+    assert "None" not in text
+
+    # Today's find is marked in-table instead of repeated as a second list.
+    assert body[1].rstrip().endswith("*")
+    assert "_* = first seen today_" in text
+    assert text.count("Base Builder Rewards") == 1
+
+    # URLs survive as a numbered link row (links cannot live inside a code block).
+    assert "<https://ethglobal.com/events/ny|#1>" in text
+    assert "<https://x.com/buildonbase/status/1|#2>" in text
+
+    assert "515 fetched" not in text
+    assert "60 fetched → 35 deduped → 13 classified → 4 verified → 1 pushed" in text
+    assert "*📥 Today* · 2 new · grant: 1, bounty: 1 · via twitter: 1, rss: 1" in text
+    assert "*🌐 New sources today* · twitter_buildonbase" in text
+
+
+def test_send_daily_summary_quiet_day_omits_empty_breakdowns() -> None:
+    sent = {}
+
+    class FakeClient:
+        def chat_postMessage(self, **kwargs):
+            sent.update(kwargs)
+            return {"ts": "123.456"}
+
+    dispatcher = SlackDispatcher.__new__(SlackDispatcher)
+    dispatcher._configured = True
+    dispatcher.client = FakeClient()
+    dispatcher.channel_id = "C123"
+
+    dispatcher.send_daily_summary(
+        {
+            "summary_date": "2026-07-07",
+            "totals": {"fetched": 10, "deduped": 10},
+            "today_scan_stats": {"total_new_events": 0, "by_event_type": {}, "by_source_type": {}},
+            "historical_high_score": {"total_count": 0, "by_event_type": {}, "recent_events": []},
+            "new_events": [],
+            "new_event_sources": [],
+        }
+    )
+
+    text = sent["text"]
+
+    assert "No open opportunities" in text
+    assert "*📥 Today* · 0 new" in text
+    # The old layout printed "None · via None" here.
+    assert "None" not in text
+    assert "Active mix" not in text
+    assert "New sources today" not in text
+
+
+def test_summary_table_truncates_beyond_the_row_limit() -> None:
+    from src.dispatch.slack_client import SUMMARY_TABLE_ROW_LIMIT, _render_summary_table
+
+    events = [
+        {"id": i, "event_type": "grant", "title": f"Grant {i}", "final_score": float(i)}
+        for i in range(SUMMARY_TABLE_ROW_LIMIT + 4)
+    ]
+
+    table, links = _render_summary_table(events, set())
+
+    assert table.count("\n") == SUMMARY_TABLE_ROW_LIMIT + 4  # header + rule + rows + notice
+    assert "… 4 more not shown" in table
+    assert links == []  # no urls supplied

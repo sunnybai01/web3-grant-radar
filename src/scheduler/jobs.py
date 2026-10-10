@@ -10,7 +10,11 @@ from config.settings import settings
 logger = logging.getLogger(__name__)
 
 # Schedule definitions
-GRANT_HACKATHON_SCHEDULE = "0 9 * * *"   # 09:00 daily
+# Grant + hackathon discovery runs twice a day. config/sources.yaml and the README
+# both document "0 9,21 * * *"; this constant is the only thing that actually
+# schedules it, so a mismatch here halves the coverage of the main opportunity
+# stream (evening announcements would wait until the next morning).
+GRANT_HACKATHON_SCHEDULE = "0 9,21 * * *"   # 09:00 and 21:00 daily (Asia/Shanghai)
 HEARTBEAT_SCHEDULE = f"*/{settings.HEARTBEAT_INTERVAL_MINUTES} * * * *"
 DAILY_SUMMARY_SCHEDULE = settings.DAILY_SUMMARY_CRON
 SOCIAL_WATCH_INTERVAL_MINUTES = max(1, int(settings.SOCIAL_WATCH_INTERVAL_MINUTES))

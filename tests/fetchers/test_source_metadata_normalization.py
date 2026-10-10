@@ -87,7 +87,7 @@ def test_load_sources_config_backfills_social_metadata_for_twitter_sources(tmp_p
     assert source["watch_priority"] == "normal"
 
 
-def test_load_sources_config_applies_default_tavily_success_cooldown(tmp_path: Path) -> None:
+def test_load_sources_config_applies_default_tavily_success_cooldown(tmp_path: Path, isolated_defaults) -> None:
     path = tmp_path / "sources.yaml"
     path.write_text(
         "sources:\n"
@@ -102,10 +102,10 @@ def test_load_sources_config_applies_default_tavily_success_cooldown(tmp_path: P
     config = load_sources_config(str(path))
     source = config["sources"][0]
 
-    assert source["success_cooldown_minutes"] == 2880
+    assert source["success_cooldown_minutes"] == 5760
 
 
-def test_load_sources_config_applies_default_tavily_budget(tmp_path: Path) -> None:
+def test_load_sources_config_applies_default_tavily_budget(tmp_path: Path, isolated_defaults) -> None:
     path = tmp_path / "sources.yaml"
     path.write_text(
         "sources:\n"
@@ -120,4 +120,4 @@ def test_load_sources_config_applies_default_tavily_budget(tmp_path: Path) -> No
     config = load_sources_config(str(path))
     source = config["sources"][0]
 
-    assert source["max_sources_per_run"] == 4
+    assert source["max_sources_per_run"] == 1

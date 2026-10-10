@@ -23,8 +23,14 @@ class RawSignal(Base):
     fetched_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
 
     __table_args__ = (
-        UniqueConstraint("canonical_url", name="uq_raw_signals_canonical_url"),
+        # Keyed on (url, content_hash), not url alone: many listing/index pages keep a
+        # stable URL while their content rolls over, and a url-only key would block
+        # every opportunity added after the first fetch.
+        UniqueConstraint(
+            "canonical_url", "content_hash", name="uq_raw_signals_canonical_url_content"
+        ),
         Index("ix_raw_signals_fetched", "source_name", "fetched_at"),
+        Index("ix_raw_signals_url_hash", "canonical_url", "content_hash"),
     )
 
 
@@ -36,6 +42,7 @@ class Event(Base):
     event_type = Column(String(32), nullable=False, index=True)  # grant|hackathon|bounty|other
     title = Column(String(512), nullable=False)
     description = Column(Text, nullable=True)
+    start_date = Column(DateTime(timezone=True), nullable=True)
     deadline = Column(DateTime(timezone=True), nullable=True, index=True)
     amount = Column(String(256), nullable=True)
     track = Column(String(128), nullable=True)
@@ -63,6 +70,9 @@ class Event(Base):
     slack_ts = Column(String(64), nullable=True)
     slack_channel_id = Column(String(32), nullable=True)
 
+    # Manual dismissal — operator marks opportunity as not matching
+    is_dismissed = Column(Boolean, default=False, index=True)
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -73,6 +83,15 @@ class Event(Base):
         Index("ix_events_type_score", "event_type", "final_score"),
         Index("ix_events_status", "status", "created_at"),
         Index("ix_events_window", "created_at", "ecosystem"),
+        # Covers: WHERE status IN (?) AND event_type IN (?) AND final_score >= ?
+        #         ORDER BY final_score DESC
+        Index(
+            "ix_events_dashboard",
+            "status",
+            "event_type",
+            "final_score",
+            postgresql_using="btree",
+        ),
     )
 
 

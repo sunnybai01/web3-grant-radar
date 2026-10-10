@@ -91,7 +91,7 @@ class TwitterFetcher(BaseFetcher):
                     raw_content=raw_content,
                     raw_url=raw_url,
                     canonical_url=canonical,
-                    metadata={
+                    metadata=self._enrich({
                         "title": (row.get("text", "") or "")[:120],
                         "platform": "twitter",
                         "tweet_id": tweet_id,
@@ -105,7 +105,7 @@ class TwitterFetcher(BaseFetcher):
                         "content_hash": hashlib.sha256(raw_content.encode()).hexdigest(),
                         "ecosystem": self.config.get("ecosystem"),
                         "category": self.config.get("category"),
-                    },
+                    }),
                 )
             )
 

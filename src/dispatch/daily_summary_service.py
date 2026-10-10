@@ -19,6 +19,27 @@ SUMMARY_JOBS = {
 # Bounty opportunities are out of scope; exclude them from all summary sections.
 EXCLUDED_EVENT_TYPES = ("bounty",)
 
+# Statuses that must never be presented as open opportunities. "fraud" rows were
+# reaching the Slack summary because only event_type was filtered.
+EXCLUDED_EVENT_STATUSES = ("fraud", "expired", "archived")
+
+
+def _active_events(db: Session):
+    """Base query for events the summary is allowed to report on.
+
+    Operator-dismissed events are invalid data: they must never reach Slack in
+    any section. Deleted events are hard-removed from the table, so they drop
+    out here for free. Fraud-flagged and expired rows are excluded too. Every
+    summary query must start from this helper.
+    """
+    return db.query(Event).filter(
+        Event.event_type.notin_(EXCLUDED_EVENT_TYPES),
+        Event.status.notin_(EXCLUDED_EVENT_STATUSES),
+        # IS NOT TRUE, not "= false": the column is nullable, so rows predating
+        # it hold NULL and must still count as not-dismissed.
+        Event.is_dismissed.is_not(True),
+    )
+
 
 def _day_bounds(summary_date: dt.date) -> tuple[dt.datetime, dt.datetime]:
     tz = ZoneInfo("Asia/Shanghai")
@@ -48,6 +69,10 @@ def _serialize_event(event: Event, primary_source: EventSource | None) -> dict:
         "ecosystem": event.ecosystem,
         "final_score": event.final_score,
         "status": event.status,
+        # Amount and deadline drive the actual go/no-go call, so the summary needs
+        # them inline rather than making the operator open every link.
+        "amount": event.amount or "",
+        "deadline": event.deadline.date().isoformat() if event.deadline else "",
         "source_type": primary_source.source_type if primary_source is not None else "",
         "source_name": primary_source.source_name if primary_source is not None else "",
         "source_url": (
@@ -83,11 +108,10 @@ def build_daily_summary(db: Session, *, summary_date: dt.date) -> dict:
     }
 
     events = (
-        db.query(Event)
+        _active_events(db)
         .filter(
             Event.created_at >= start,
             Event.created_at < end,
-            Event.event_type.notin_(EXCLUDED_EVENT_TYPES),
         )
         .order_by(Event.created_at.asc())
         .all()
@@ -117,10 +141,7 @@ def build_daily_summary(db: Session, *, summary_date: dt.date) -> dict:
     }
 
     historical_events = (
-        db.query(Event)
-        .filter(
-            Event.event_type.notin_(EXCLUDED_EVENT_TYPES),
-        )
+        _active_events(db)
         .order_by(
             func.coalesce(Event.final_score, 0).desc(),
             Event.created_at.desc(),

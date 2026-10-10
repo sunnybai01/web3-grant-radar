@@ -128,6 +128,79 @@ def test_build_daily_summary_includes_totals_and_new_event_sources() -> None:
         db.close()
 
 
+def test_build_daily_summary_excludes_dismissed_events_from_every_section() -> None:
+    db = _db_session()
+    try:
+        summary_date = datetime.date(2026, 7, 6)
+
+        kept = Event(
+            event_type="grant",
+            title="Base Builder Rewards",
+            ecosystem="base",
+            final_score=7.8,
+            created_at=datetime.datetime(2026, 7, 6, 4, 0),
+        )
+        dismissed_today = Event(
+            event_type="grant",
+            title="Dismissed Today",
+            ecosystem="base",
+            final_score=9.5,
+            created_at=datetime.datetime(2026, 7, 6, 5, 0),
+            is_dismissed=True,
+        )
+        dismissed_older = Event(
+            event_type="hackathon",
+            title="Dismissed Earlier",
+            ecosystem="arbitrum",
+            final_score=9.9,
+            created_at=datetime.datetime(2026, 7, 1, 4, 0),
+            is_dismissed=True,
+        )
+        db.add_all([kept, dismissed_today, dismissed_older])
+        db.commit()
+
+        payload = build_daily_summary(db, summary_date=summary_date)
+
+        titles = [event["title"] for event in payload["new_events"]]
+        historical_titles = [
+            event["title"] for event in payload["historical_high_score"]["recent_events"]
+        ]
+
+        assert titles == ["Base Builder Rewards"]
+        assert historical_titles == ["Base Builder Rewards"]
+        assert payload["historical_high_score"]["total_count"] == 1
+        assert payload["historical_high_score"]["by_event_type"] == {"grant": 1}
+    finally:
+        db.close()
+
+
+def test_build_daily_summary_treats_null_is_dismissed_as_not_dismissed() -> None:
+    """is_dismissed is nullable; rows predating the column must stay visible."""
+    db = _db_session()
+    try:
+        summary_date = datetime.date(2026, 7, 6)
+
+        legacy = Event(
+            event_type="grant",
+            title="Legacy Unflagged Event",
+            ecosystem="base",
+            final_score=7.0,
+            created_at=datetime.datetime(2026, 7, 6, 4, 0),
+            is_dismissed=None,
+        )
+        db.add(legacy)
+        db.commit()
+
+        payload = build_daily_summary(db, summary_date=summary_date)
+
+        assert [event["title"] for event in payload["new_events"]] == ["Legacy Unflagged Event"]
+        assert [
+            event["title"] for event in payload["historical_high_score"]["recent_events"]
+        ] == ["Legacy Unflagged Event"]
+    finally:
+        db.close()
+
+
 def test_build_daily_summary_handles_empty_new_events() -> None:
     db = _db_session()
     try:
@@ -163,5 +236,34 @@ def test_build_daily_summary_handles_empty_new_events() -> None:
             "by_event_type": {},
             "recent_events": [],
         }
+    finally:
+        db.close()
+
+# ---------------------------------------------------------------------------
+# Events the operator must never see as "open opportunities".
+# ---------------------------------------------------------------------------
+
+def test_fraud_and_expired_events_are_excluded_from_the_summary() -> None:
+    """Only event_type was filtered, so status='fraud' rows reached Slack."""
+    db = _db_session()
+    try:
+        summary_date = datetime.date(2026, 7, 6)
+        when = datetime.datetime(2026, 7, 6, 3, 0)
+
+        db.add_all([
+            Event(event_type="grant", title="Real Grant", status="new", created_at=when),
+            Event(event_type="grant", title="Phishing Grant", status="fraud", created_at=when),
+            Event(event_type="hackathon", title="Long Gone Hackathon", status="expired", created_at=when),
+            Event(event_type="grant", title="Archived Grant", status="archived", created_at=when),
+            Event(event_type="grant", title="Dismissed Grant", status="new",
+                  is_dismissed=True, created_at=when),
+        ])
+        db.commit()
+
+        payload = build_daily_summary(db, summary_date=summary_date)
+
+        titles = [event["title"] for event in payload["new_events"]]
+        assert titles == ["Real Grant"]
+        assert payload["new_events_count"] == 1
     finally:
         db.close()

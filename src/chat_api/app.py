@@ -10,6 +10,7 @@ from .schemas import (
     DashboardSourceHealthResponse,
     DedupResetResponse,
     DeleteOpportunityResponse,
+    DismissEventResponse,
     HealthResponse,
     InvestigateRequest,
     InvestigateResponse,
@@ -39,8 +40,8 @@ def health() -> HealthResponse:
 def dashboard_opportunities(
     event_types: list[str] = Query(default=["grant", "hackathon"]),
     ecosystem: str = "",
-    min_score: float = 5.0,
-    days: int = 15,
+    min_score: float = 0.0,
+    days: int = 0,
     source_trust: str = "all",
 ) -> DashboardOpportunitiesResponse:
     from . import dashboard_service
@@ -73,6 +74,27 @@ def delete_dashboard_opportunity(event_id: int) -> DeleteOpportunityResponse:
         raise
 
     return DeleteOpportunityResponse(**result)
+
+
+@app.put(
+    "/api/v1/dashboard/opportunities/{event_id}/dismiss",
+    response_model=DismissEventResponse,
+    dependencies=[Depends(verify_internal_key)],
+)
+def dismiss_dashboard_opportunity(
+    event_id: int,
+    dismissed: bool = Query(default=True, description="Set dismissed=true to mark as not matching, false to restore"),
+) -> DismissEventResponse:
+    from . import dashboard_service
+
+    try:
+        result = dashboard_service.dismiss_opportunity(event_id, dismissed=dismissed)
+    except ValueError as exc:
+        if str(exc) == "event_not_found":
+            raise HTTPException(status_code=404, detail="event_not_found") from exc
+        raise
+
+    return DismissEventResponse(**result)
 
 
 @app.get(

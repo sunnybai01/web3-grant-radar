@@ -13,6 +13,11 @@ from config.settings import settings
 
 logger = logging.getLogger(__name__)
 
+# Per-request timeout and retry budget. The SDK defaults (600s, 3 attempts) let a
+# single hung provider block the sequential item loop for ~30 minutes.
+LLM_TIMEOUT_SECONDS = settings.LLM_TIMEOUT_SECONDS
+LLM_MAX_RETRIES = settings.LLM_MAX_RETRIES
+
 # ---------------------------------------------------------------------------
 # Provider registry — each entry produces an OpenAI-compatible client + model id
 # ---------------------------------------------------------------------------
@@ -21,25 +26,29 @@ PROVIDER_CONFIG = {
     "deepseek": {
         "api_key": lambda: settings.DEEPSEEK_API_KEY,
         "base_url": lambda: settings.DEEPSEEK_BASE_URL,
-        "model": "deepseek-chat",
+        "model": settings.DEEPSEEK_MODEL,
         "create_client": lambda: OpenAI(
             api_key=settings.DEEPSEEK_API_KEY,
             base_url=settings.DEEPSEEK_BASE_URL,
+            timeout=LLM_TIMEOUT_SECONDS,
+            max_retries=LLM_MAX_RETRIES,
         ),
     },
     "qwen": {
         "api_key": lambda: settings.QWEN_API_KEY,
         "base_url": lambda: settings.QWEN_BASE_URL,
-        "model": "qwen-turbo-latest",
+        "model": settings.QWEN_MODEL,
         "create_client": lambda: OpenAI(
             api_key=settings.QWEN_API_KEY,
             base_url=settings.QWEN_BASE_URL,
+            timeout=LLM_TIMEOUT_SECONDS,
+            max_retries=LLM_MAX_RETRIES,
         ),
     },
     "gemini": {
         "api_key": lambda: settings.GEMINI_API_KEY,
         "base_url": lambda: settings.GEMINI_BASE_URL,
-        "model": "gemini-2.0-flash-lite",
+        "model": settings.GEMINI_MODEL,
         "create_client": lambda: None,  # Gemini uses different SDK path
     },
 }
@@ -57,14 +66,19 @@ class LLMGateway:
 
     def __init__(self):
         self._clients: Dict[str, Any] = {}
+        self._model_by_provider: Dict[str, str] = {}
         for name, cfg in PROVIDER_CONFIG.items():
             api_key = cfg["api_key"]()
             if not api_key:
                 continue
-            if name == "gemini":
-                self._clients[name] = self._init_gemini(api_key)
-            else:
-                self._clients[name] = cfg["create_client"]()
+            client = self._init_gemini(api_key) if name == "gemini" else cfg["create_client"]()
+            if client is None:
+                # Storing a None client made `if not self._clients` never fire and
+                # deferred the breakage to call time.
+                logger.warning("LLM provider '%s' is configured but unusable — skipped", name)
+                continue
+            self._clients[name] = client
+            self._model_by_provider[name] = cfg["model"]
 
         if not self._clients:
             logger.warning("No LLM providers configured — LLM gateway will fail!")
@@ -107,7 +121,11 @@ class LLMGateway:
                     )
 
                 if result:
+                    self.last_provider = provider_name
+                    self.last_model = self._model_by_provider.get(provider_name)
                     return result
+
+                logger.warning("LLM provider '%s' returned an empty response", provider_name)
 
             except Exception as e:
                 logger.warning(f"LLM provider '{provider_name}' failed: {e}")

@@ -197,7 +197,7 @@ def test_repo_sources_include_requested_core_twitter_accounts() -> None:
         assert social_sources[name]["screen_name"] == screen_name
 
 
-def test_requested_core_twitter_accounts_are_enabled_for_social_watch_scan() -> None:
+def test_requested_core_twitter_accounts_exist_and_carry_expected_metadata() -> None:
     config = load_sources_config()
     social_sources = {
         source["name"]: source
@@ -205,7 +205,7 @@ def test_requested_core_twitter_accounts_are_enabled_for_social_watch_scan() -> 
         if source.get("schedule") == "social_watch"
     }
 
-    expected_enabled = {
+    expected_accounts = {
         "twitter_superteamearn",
         "twitter_bountycaster",
         "twitter_dorahacks",
@@ -219,11 +219,31 @@ def test_requested_core_twitter_accounts_are_enabled_for_social_watch_scan() -> 
         "twitter_aptosfoundation",
         "twitter_monad_xyz",
         "twitter_berachain",
-        "twitter_megalabs_xyz",
     }
 
-    for name in expected_enabled:
-        assert social_sources[name]["enabled"] is True
+    for name in expected_accounts:
+        assert name in social_sources, f"missing Twitter source: {name}"
+        source = social_sources[name]
+        assert source["fetch_method"] == "twitter"
+        assert source["schedule"] == "social_watch"
+        assert source["enabled"] is True, f"{name} should be enabled for social watch"
+
+
+def test_retired_twitter_accounts_are_disabled_with_a_reason() -> None:
+    """A handle that no longer exists must stay off, with a documented reason.
+
+    twitter_megalabs_xyz accumulated 587 consecutive failures before being
+    disabled; a test demanding it be enabled would force a known-dead source back
+    into every social_watch run.
+    """
+    config = load_sources_config()
+    social_sources = {
+        source["name"]: source
+        for source in config["sources"]
+        if source.get("schedule") == "social_watch"
+    }
+
+    assert social_sources["twitter_megalabs_xyz"]["enabled"] is False
 
 
 def test_expanded_twitter_accounts_exist_and_are_enabled() -> None:
@@ -276,10 +296,18 @@ def test_expanded_official_website_sources_exist_and_are_enabled() -> None:
         "sui_programs": {"schedule": "grant_hackathon", "chain": "sui", "official": True},
     }
 
+    # Two of these were deliberately retired (their feeds 404 / were removed) and
+    # are replaced by their Tavily + Twitter counterparts. Assert the metadata
+    # contract for all of them and only require `enabled` for the live ones.
+    retired = {"polygon_village", "near_grants"}
+
     for name, attrs in expected.items():
         assert name in source_map, f"missing official source: {name}"
         src = source_map[name]
-        assert src["enabled"] is True, f"{name} should be enabled"
+        if name in retired:
+            assert src["enabled"] is False, f"{name} was retired and must stay off"
+        else:
+            assert src["enabled"] is True, f"{name} should be enabled"
         assert src["schedule"] == attrs["schedule"]
         assert src["chain"] == attrs["chain"]
         assert src["official"] is True

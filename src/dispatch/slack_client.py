@@ -5,11 +5,22 @@ from typing import Optional, Dict, Any
 
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
+from slack_sdk.http_retry.builtin_handlers import RateLimitErrorRetryHandler
 
 from config.settings import settings
 from src.classifier.scorer import stars_from_score
 
 logger = logging.getLogger(__name__)
+
+
+def _retry_handlers() -> list:
+    """Retry handlers for the Slack client.
+
+    slack_sdk's default set only covers connection errors, so a 429
+    ("ratelimited") response dropped the card instead of waiting out the window.
+    Pushing one message per event makes bursts likely.
+    """
+    return [RateLimitErrorRetryHandler(max_retry_count=3)]
 
 EMOJI_MAP = {
     "GRANT": "💰",
@@ -55,13 +66,128 @@ def _format_counter_items(items: Dict[str, Any]) -> str:
     return ", ".join(f"{key}: {value}" for key, value in items.items())
 
 
+# --- Daily summary table rendering -----------------------------------------
+# Slack cannot do both aligned columns and clickable links in one element: a
+# ``` block renders monospace but strips link markup, while mrkdwn linkifies but
+# uses a proportional font where space-padding does not align. The summary table
+# therefore lives in a code block and the URLs follow it as a numbered link row.
+
+SUMMARY_TABLE_ROW_LIMIT = 25
+
+TYPE_ABBREV = {"HACKATHON": "HACK", "GRANT": "GRANT", "BOUNTY": "BOUNTY"}
+
+# (header, width, align) — one definition drives both the header and every row so
+# the two cannot drift apart. Total renders at 80 chars: wide enough for real titles
+# and amounts, and Slack scrolls a code block horizontally on narrow screens.
+SUMMARY_COLUMNS = (
+    ("#", 3, "r"),
+    ("SCORE", 5, "r"),
+    ("TYPE", 5, "l"),
+    ("TITLE", 30, "l"),
+    ("AMOUNT", 12, "l"),
+    ("DEADLINE", 10, "l"),
+    ("NEW", 3, "l"),
+)
+
+
+def _pad(value: str, width: int, align: str) -> str:
+    return value.rjust(width) if align == "r" else value.ljust(width)
+
+
+def _summary_table_line(cells: tuple) -> str:
+    return "  ".join(
+        _pad(_truncate(cell, width), width, align)
+        for cell, (_head, width, align) in zip(cells, SUMMARY_COLUMNS)
+    ).rstrip()
+
+
+def _truncate(value: str, width: int) -> str:
+    value = (value or "").strip()
+    if len(value) <= width:
+        return value
+    if width <= 1:
+        return value[:width]
+    return value[: width - 1] + "…"
+
+
+def _format_score(value: Any) -> str:
+    return f"{value:.1f}" if isinstance(value, (int, float)) else "—"
+
+
+def _format_type_abbrev(event_type: str) -> str:
+    normalized = (event_type or "other").strip().upper()
+    return TYPE_ABBREV.get(normalized, _truncate(normalized, 5))
+
+
+def _summary_table_row(index: int, event: Dict[str, Any], is_new: bool) -> str:
+    return _summary_table_line(
+        (
+            str(index),
+            _format_score(event.get("final_score")),
+            _format_type_abbrev(str(event.get("event_type") or "")),
+            str(event.get("title") or "Untitled"),
+            str(event.get("amount") or "—"),
+            str(event.get("deadline") or "Rolling"),
+            "*" if is_new else "",
+        )
+    )
+
+
+def _score_sort_key(event: Dict[str, Any]) -> float:
+    score = event.get("final_score")
+    return score if isinstance(score, (int, float)) else -1.0
+
+
+def _render_link_rows(links: list, per_row: int = 10) -> list:
+    """Chunk the numbered links so a long table does not produce one giant line."""
+    rows = []
+    for start in range(0, len(links), per_row):
+        chunk = links[start : start + per_row]
+        prefix = "🔗 " if start == 0 else "     "
+        rows.append(
+            prefix + " · ".join(_format_slack_link(url, f"#{i}") for i, _label, url in chunk)
+        )
+    return rows
+
+
+def _render_summary_table(events: list, new_ids: set) -> tuple[str, list]:
+    """Return (code-block table, [(index, label, url)]) for the given events."""
+    header = _summary_table_line(tuple(head for head, _width, _align in SUMMARY_COLUMNS))
+    # Full width regardless of the header's trailing rstrip, so the rule spans the table.
+    rule_width = sum(width for _head, width, _align in SUMMARY_COLUMNS) + 2 * (
+        len(SUMMARY_COLUMNS) - 1
+    )
+
+    rows = [header, "─" * rule_width]
+    links = []
+
+    # The score column is the whole point of the table, so guarantee it reads top-down
+    # here rather than trusting whatever order the caller happened to pass in.
+    events = sorted(events, key=_score_sort_key, reverse=True)
+
+    for index, event in enumerate(events[:SUMMARY_TABLE_ROW_LIMIT], start=1):
+        event_id = event.get("id")
+        is_new = event_id in new_ids if event_id is not None else False
+        rows.append(_summary_table_row(index, event, is_new))
+
+        url = event.get("application_url") or event.get("source_url") or ""
+        if url:
+            links.append((index, str(event.get("title") or "Untitled"), url))
+
+    dropped = len(events) - SUMMARY_TABLE_ROW_LIMIT
+    if dropped > 0:
+        rows.append(f"… {dropped} more not shown")
+
+    return "```\n" + "\n".join(rows) + "\n```", links
+
+
 class SlackDispatcher:
     """Pushes structured opportunities to Slack via Block Kit."""
 
     def __init__(self):
         self._configured = bool(settings.SLACK_BOT_TOKEN and settings.SLACK_CHANNEL_ID)
         if self._configured:
-            self.client = WebClient(token=settings.SLACK_BOT_TOKEN)
+            self.client = WebClient(token=settings.SLACK_BOT_TOKEN, retry_handlers=_retry_handlers())
             self.channel_id = settings.SLACK_CHANNEL_ID
         else:
             self.client = None
@@ -258,59 +384,61 @@ class SlackDispatcher:
         new_events = summary.get("new_events", []) or []
         summary_date = summary.get("summary_date", "unknown-date")
 
-        lines = [
-            f"*Daily Summary · {summary_date}*",
-            f"Fetched: {totals.get('fetched', 0)} | New: {totals.get('new', 0)} | Deduped: {totals.get('deduped', 0)} | Classified: {totals.get('classified', 0)} | Verified: {totals.get('verified', 0)} | Pushed: {totals.get('pushed', 0)}",
-        ]
+        # One table, not two lists. new_events is a strict subset of the historical
+        # set (same table, no date filter), so listing both repeated every one of
+        # today's finds verbatim — that duplication was the main source of noise.
+        active_events = historical_high_score.get("recent_events", []) or []
+        new_ids = {event.get("id") for event in new_events if event.get("id") is not None}
 
-        if new_events:
-            lines.append(f"New qualified opportunities: {len(new_events)}")
-            lines.append(f"Sources: {', '.join(source_names)}")
-            for event in new_events[:10]:
-                title = event.get("title", "Untitled")
-                source_type = _format_source_type(str(event.get("source_type") or ""))
-                source_url = event.get("source_url") or event.get("application_url") or ""
-                title_text = _format_slack_link(source_url, title) if source_url else title
-                source_suffix = ""
-                if source_type != "Unknown":
-                    source_suffix = f" | Source: {source_type}"
-                lines.append(
-                    f"- [{str(event.get('event_type') or 'other').upper()}] {title_text}{source_suffix}"
-                )
+        lines = [f"*📊 Daily Summary · {summary_date}*", ""]
+
+        if active_events:
+            new_today = sum(
+                1 for event in active_events if event.get("id") in new_ids
+            )
+            headline = f"*🎯 Open opportunities · {len(active_events)} active"
+            if new_today:
+                headline += f", {new_today} new today"
+            lines.append(headline + "*")
+
+            table, links = _render_summary_table(active_events, new_ids)
+            lines.append(table)
+            lines.extend(_render_link_rows(links))
+            if new_today:
+                lines.append("_* = first seen today_")
         else:
-            lines.append("No new qualified opportunities today.")
+            lines.append("_No open opportunities — everything is dismissed or expired._")
 
-        lines.extend(
+        funnel = " → ".join(
             [
-                "",
-                "Today's new content stats",
-                f"Total new events: {today_scan_stats.get('total_new_events', 0)}",
-                f"By event type: {_format_counter_items(today_scan_stats.get('by_event_type', {}))}",
-                f"By source type: {_format_counter_items(today_scan_stats.get('by_source_type', {}))}",
-                "",
-                f"Historical opportunities: {historical_high_score.get('total_count', 0)}",
-                f"By event type: {_format_counter_items(historical_high_score.get('by_event_type', {}))}",
+                f"{totals.get('fetched', 0)} fetched",
+                f"{totals.get('deduped', 0)} deduped",
+                f"{totals.get('classified', 0)} classified",
+                f"{totals.get('verified', 0)} verified",
+                f"{totals.get('pushed', 0)} pushed",
             ]
         )
 
-        recent_high_score_events = historical_high_score.get("recent_events", []) or []
-        if recent_high_score_events:
-            lines.append("Recent opportunities:")
-            for event in recent_high_score_events:
-                title = event.get("title", "Untitled")
-                source_type = _format_source_type(str(event.get("source_type") or ""))
-                source_url = event.get("source_url") or event.get("application_url") or ""
-                title_text = _format_slack_link(source_url, title) if source_url else title
-                score_value = event.get("final_score")
-                score_text = f"{score_value:.1f}" if isinstance(score_value, (int, float)) else "N/A"
-                source_suffix = f" | Source: {source_type}" if source_type != "Unknown" else ""
-                lines.append(
-                    f"- [{str(event.get('event_type') or 'other').upper()}] {title_text} | Score: {score_text}{source_suffix}"
-                )
-        else:
-            lines.append("No historical opportunities yet.")
+        lines.extend(["", f"*⚙️ Pipeline* · {funnel}"])
 
-        text = "\n".join(lines)
+        # Only surface the breakdowns that actually have content — on a quiet day the
+        # old layout printed "None · via None", which is noise pretending to be data.
+        today_parts = [f"{today_scan_stats.get('total_new_events', 0)} new"]
+        if today_scan_stats.get("by_event_type"):
+            today_parts.append(_format_counter_items(today_scan_stats["by_event_type"]))
+        if today_scan_stats.get("by_source_type"):
+            today_parts.append(f"via {_format_counter_items(today_scan_stats['by_source_type'])}")
+        lines.append("*📥 Today* · " + " · ".join(today_parts))
+
+        if historical_high_score.get("by_event_type"):
+            lines.append(
+                "*📚 Active mix* · "
+                + _format_counter_items(historical_high_score["by_event_type"])
+            )
+        if source_names:
+            lines.append(f"*🌐 New sources today* · {', '.join(source_names)}")
+
+        text = "\n".join(lines).strip()
 
         try:
             resp = self.client.chat_postMessage(

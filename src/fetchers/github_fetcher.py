@@ -79,7 +79,7 @@ class GitHubFetcher(BaseFetcher):
                 raw_content=raw_content,
                 raw_url=html_url,
                 canonical_url=html_url,
-                metadata={
+                metadata=self._enrich({
                     "title": title,
                     "org": org,
                     "repo": issue.get("repository_url", "").split("/repos/")[-1],
@@ -91,7 +91,7 @@ class GitHubFetcher(BaseFetcher):
                     "content_hash": hashlib.sha256(raw_content.encode()).hexdigest(),
                     "ecosystem": self.config.get("ecosystem"),
                     "category": self.config.get("category"),
-                },
+                }),
             ))
 
         return items

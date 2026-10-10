@@ -37,6 +37,10 @@ chroma_data/
 # Reports
 reports/
 
+# Database dumps (operational artifacts, not source). Note: one older dump is
+# still tracked from before this rule; use `git rm --cached` if you want it gone.
+backups/*.sql
+
 # Logs
 *.log
 logs/

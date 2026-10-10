@@ -81,6 +81,14 @@ def _normalize_source_metadata(source: dict) -> dict:
             or settings.TAVILY_MAX_SOURCES_PER_RUN
         )
 
+    # Backoff for sources that keep failing. With no default, the skip rules never
+    # matched (`failure_cooldown_minutes` was absent from every source), so a
+    # permanently dead source was retried on every single run.
+    normalized["failure_cooldown_minutes"] = int(
+        normalized.get("failure_cooldown_minutes")
+        or settings.FAILURE_COOLDOWN_MINUTES
+    )
+
     return normalized
 
 

@@ -4,6 +4,7 @@ import logging
 from typing import Optional, List
 
 from sqlalchemy import and_, func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .models import (
@@ -40,6 +41,21 @@ def canonical_url_exists(db: Session, canonical_url: str) -> bool:
     ).scalar()
 
 
+def raw_signal_exists(db: Session, canonical_url: str, content_hash: str) -> bool:
+    """L1 dedup lookup: same URL *and* same content already seen.
+
+    A stable URL whose content changed is a new signal, not a duplicate.
+    """
+    return db.query(
+        db.query(RawSignal)
+        .filter(
+            RawSignal.canonical_url == canonical_url,
+            RawSignal.content_hash == content_hash,
+        )
+        .exists()
+    ).scalar()
+
+
 # --- Event ---
 
 def insert_event(db: Session, **kwargs) -> Event:
@@ -71,6 +87,17 @@ def delete_event(db: Session, event_id: int) -> Optional[Event]:
         return None
     db.delete(event)
     db.commit()
+    return event
+
+
+def dismiss_event(db: Session, event_id: int, dismissed: bool = True) -> Optional[Event]:
+    """Mark (or unmark) an event as dismissed (not matching)."""
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event:
+        return None
+    event.is_dismissed = dismissed
+    db.commit()
+    db.refresh(event)
     return event
 
 
@@ -110,9 +137,39 @@ def mark_event_fraud(db: Session, event_id: int, log: dict) -> Optional[Event]:
 
 # --- EventSource ---
 
+def _find_event_source(db: Session, event_id: int, source_url: Optional[str]):
+    """Look up one source trace by its uniqueness key.
+
+    NULL is compared with IS NULL because SQL `= NULL` never matches.
+    """
+    return (
+        db.query(EventSource)
+        .filter(
+            EventSource.event_id == event_id,
+            EventSource.source_url.is_(None)
+            if source_url is None
+            else EventSource.source_url == source_url,
+        )
+        .first()
+    )
+
+
 def add_event_source(db: Session, event_id: int, source_type: str,
                      source_name: str, source_url: Optional[str] = None,
                      raw_signal_id: Optional[int] = None) -> EventSource:
+    """Attach a source trace to an event. Idempotent on (event_id, source_url).
+
+    Two different sources can legitimately surface the *same* article URL within
+    one run (four Tavily configs hitting a single aggregator post, for example).
+    The (event_id, source_url) unique constraint used to turn that into an
+    IntegrityError which aborted the whole pipeline — and because the offending
+    items were already committed to raw_signals, L1 then blocked them forever
+    and they were never classified. A repeat now returns the existing row.
+    """
+    existing = _find_event_source(db, event_id, source_url)
+    if existing is not None:
+        return existing
+
     es = EventSource(
         event_id=event_id,
         source_type=source_type,
@@ -121,7 +178,14 @@ def add_event_source(db: Session, event_id: int, source_type: str,
         raw_signal_id=raw_signal_id,
     )
     db.add(es)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # Lost a race on the unique constraint — the row exists, so use it.
+        db.rollback()
+        es = _find_event_source(db, event_id, source_url)
+        if es is None:
+            raise
     db.refresh(es)
     return es
 

@@ -9,8 +9,10 @@ Verification strategy (content-first, not domain-whitelist):
 - Layer 3 (security API): GoPlus / CertiK / ScamSniffer threat intelligence.
   THIS is the only hard rejection gate — actual phishing/scam detection.
 
-A verification is "verified" when L3 passes (not flagged as phishing/scam).
-L1/L2 failures only degrade the confidence level, never reject.
+A verification is "verified" only when L1 anchors the origin, L2 corroborates the
+opportunity, and a security provider actually answered. L1/L2 failures and an
+unanswered security layer produce "degraded"/"unverified" — which still reach the
+scorer, but are never stored as verified.
 """
 import logging
 from typing import Dict, Any
@@ -82,12 +84,14 @@ class Verifier:
         # L2 failure is non-fatal — it degrades confidence but doesn't reject
 
         # ---- Layer 3: Security API Checks (THE ONLY HARD GATE) ----
-        # GoPlus / CertiK / ScamSniffer — actual phishing/scam detection
+        # GoPlus / CertiK / ScamSniffer — actual phishing/scam detection.
+        # A provider that is unconfigured, rate-limited or broken reports
+        # "unknown", which is never treated as a pass.
         check_url = application_url or source_url
         l3 = security_api_check(check_url)
         verification_log["layers"]["security_api"] = l3
 
-        if not l3["passed"]:
+        if l3.get("result") == "malicious" or not l3["passed"]:
             verification_log["verdict"] = "fraud"
             return {
                 "is_verified": False,
@@ -95,14 +99,27 @@ class Verifier:
                 "verdict": "fraud",
             }
 
-        # L3 passed → not fraud. Confidence depends on L1/L2.
-        all_passed = l1["passed"] and l2.get("passed", False) and l3["passed"]
-        verification_log["verdict"] = "verified" if all_passed else "degraded"
+        # L3 found nothing wrong. Confidence depends on L1/L2 and on whether a
+        # security provider actually answered.
+        security_answered = l3.get("result") == "clean"
+        if l1["passed"] and l2.get("passed", False) and security_answered:
+            verdict = "verified"
+        elif not security_answered:
+            # No provider was consulted (no keys configured) or none answered.
+            # That is "we did not check" and must stay distinct from "we checked
+            # and have doubts" so operators can act on the right one.
+            verdict = "unchecked"
+        else:
+            verdict = "degraded"
+        verification_log["verdict"] = verdict
 
         return {
-            "is_verified": True,  # Not fraud — degraded still passes to scoring
+            # Only a fully corroborated item is persisted as verified. "degraded"
+            # and "unchecked" still flow to scoring, but the dashboard/DB must not
+            # present them as verified.
+            "is_verified": verdict == "verified",
             "verification_log": verification_log,
-            "verdict": verification_log["verdict"],
+            "verdict": verdict,
         }
 
 

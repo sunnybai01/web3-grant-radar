@@ -4,20 +4,23 @@ Wires together the full V1 pipeline:
   Fetcher → L1 Dedup → L2 Dedup → LLM Classify → Zero-trust Verify → Score → Slack Push
 """
 import logging
+import re
 import sys
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from config.settings import settings
 from src.db.database import init_db, SessionLocal
+from src.db.models import Event
 from src.fetchers.builder import load_sources_config, build_registry
 from src.fetchers.base import get_fetch_skip_reason, select_budgeted_sources
 from src.dedup.url_dedup import process_item_l1
 from src.dedup.content_dedup import ContentDeduplicator
 from src.dedup.vector_store import VectorStore
+from src.classifier.amount_filter import parse_amount_usd
 from src.classifier.keyword_filter import KeywordFilter
 from src.classifier.llm_gateway import LLMGateway
-from src.classifier.classifier import OpportunityClassifier
+from src.classifier.classifier import Classification, OpportunityClassifier
 from src.classifier.scorer import OpportunityScorer
 from src.verifier.verifier import verify_opportunity
 from src.dispatch.slack_client import SlackDispatcher
@@ -55,7 +58,8 @@ _deduplicator = None
 _classifier = None
 _scorer = None
 _slack = None
-_stats_reset_day = datetime.now(timezone.utc).day
+_index_reconciled = False
+_stats_reset_day = datetime.now(ZoneInfo("Asia/Shanghai")).date()
 STALE_EVENT_MAX_AGE = timedelta(days=settings.STALE_MAX_AGE_DAYS)
 DATE_SCRAPE_TIMEOUT = settings.DATE_SCRAPE_TIMEOUT_SECONDS
 DATE_SCRAPE_MAX_CHARS = settings.DATE_SCRAPE_MAX_CHARS
@@ -64,6 +68,7 @@ EVENT_MODEL_FIELDS = {
     "event_type",
     "title",
     "description",
+    "start_date",
     "deadline",
     "amount",
     "track",
@@ -72,6 +77,22 @@ EVENT_MODEL_FIELDS = {
     "source_url",
     "source_platform",
 }
+
+# Stages a reader can no longer act on. "results_announced" covers the common
+# false positive: a post that is genuinely about a grant/hackathon but reports an
+# outcome (winners, finalists, a grant already awarded) rather than a call to apply.
+UNACTIONABLE_STAGES = {"closed", "results_announced"}
+
+# A hackathon/program whose start date passed this long ago is almost certainly no
+# longer joinable, even when no explicit deadline was ever published.
+STALE_START_DATE_GRACE = timedelta(days=settings.STALE_START_DATE_GRACE_DAYS)
+
+# A prize/funding pool below this (in USD) isn't worth an operator's time.
+MIN_AMOUNT_USD = settings.MIN_AMOUNT_USD
+
+# Outcomes that also feed the in-process heartbeat counters. The rest are
+# pipeline bookkeeping only.
+STAT_INCREMENT_OUTCOMES = {"new", "deduped", "verified", "fraud", "pushed"}
 
 
 def _init_components():
@@ -100,6 +121,31 @@ def _init_slack():
 
     if _slack is None:
         _slack = SlackDispatcher()
+
+
+def _reconcile_vector_index_once():
+    """Make sure every live Event has a vector, once per process.
+
+    The vector index is derived state. A wiped or stale Chroma volume used to
+    leave pre-existing Events unindexed, so semantic dedup could not match them
+    and duplicates were created for opportunities already in the database.
+    """
+    global _index_reconciled
+
+    if _index_reconciled or _deduplicator is None:
+        return
+
+    from src.dedup.reconcile import reconcile_vector_index
+
+    db = SessionLocal()
+    try:
+        reconcile_vector_index(db, _deduplicator.vs, deduplicator=_deduplicator)
+    except Exception as e:
+        logger.error("Vector index reconciliation failed (dedup will be partial): %s", e)
+    finally:
+        db.close()
+
+    _index_reconciled = True
 
 
 def _persistable_event_data(event_data: dict) -> dict:
@@ -133,6 +179,26 @@ def _published_at(item) -> datetime | None:
     return None
 
 
+_TITLE_YEAR_RE = re.compile(r"\b(20\d{2})\b")
+
+
+def _title_years_all_past(title: str | None, now: datetime) -> bool:
+    """True when the title carries year labels and every one of them is a past year.
+
+    Deliberately title-only: descriptions routinely mention unrelated years ("building
+    on Ethereum since 2017") that would cause false drops. A title mixing a past and a
+    current year ("2025 recap, 2026 edition") is kept — any non-past year vetoes.
+    """
+    if not title:
+        return False
+
+    years = [int(match) for match in _TITLE_YEAR_RE.findall(title)]
+    if not years:
+        return False
+
+    return all(year < now.year for year in years)
+
+
 def _staleness_reason(
     item, structured: dict | None, source_tier: str = "discovery", now: datetime | None = None
 ) -> str | None:
@@ -140,9 +206,14 @@ def _staleness_reason(
 
     Strategy (relaxed):
     - deadline present AND in the past → definitely expired, drop
+    - no deadline AND every year in the title is a past year → drop
+    - discovery source whose start date passed >grace ago with no deadline → drop
     - discovery source with no published date AND no deadline → too uncertain, drop
     - discovery source published >60 days ago with no deadline → likely stale, drop
     - official source → never dropped for staleness (could be rolling)
+
+    A future deadline short-circuits every weaker rule below it: an explicitly stated
+    open window outranks any inference drawn from a title or a publication date.
     """
     now = now or datetime.now(timezone.utc)
     structured = structured or {}
@@ -153,14 +224,29 @@ def _staleness_reason(
     if deadline is not None and deadline < now:
         return "deadline_expired"
 
+    # A past year in the title is about as strong as a past deadline ("ETHIndiaVilla
+    # 2025" seen in 2026), so this applies to official sources too — but only when no
+    # deadline was found, which keeps rolling programs safe.
+    if deadline is None and _title_years_all_past(structured.get("title"), now):
+        return "title_year_past"
+
     # Official sources are always kept (their announcements are assumed rolling
     # when no explicit deadline is given).
     if tier == "official":
         return None
 
     published_at = _published_at(item)
+    start_date = _parse_datetime(structured.get("start_date"))
 
-    # Discovery source with zero time information → too uncertain
+    # The program already started a while ago and no deadline ever surfaced. Checked
+    # before the rules below so it can catch items that would otherwise pass.
+    if deadline is None and start_date is not None:
+        if now - start_date > STALE_START_DATE_GRACE:
+            return "start_date_passed"
+
+    # Discovery source with zero time information → too uncertain. A start_date alone
+    # does not rescue an item here: without a publication date there is no way to tell
+    # whether the stated window is this year's or a rerun of an old announcement.
     if published_at is None and deadline is None:
         return "missing_published_at"
 
@@ -196,9 +282,11 @@ def _try_extract_dates_from_url(url: str, llm: LLMGateway) -> dict | None:
         text = container.get_text(separator="\n", strip=True)[:DATE_SCRAPE_MAX_CHARS]
 
         prompt = (
-            "Extract ONLY the published date and application deadline from this web page. "
+            "Extract ONLY the dates below from this web page. "
             "Return JSON with no extra text:\n"
-            '{"published_date": "ISO 8601 or null", "deadline": "ISO 8601 or null"}\n\n'
+            '{"published_date": "ISO 8601 or null", "deadline": "ISO 8601 or null", '
+            '"start_date": "ISO 8601 or null"}\n'
+            "start_date is when the program, event, or application window opens.\n\n"
             f"Page text:\n{text}"
         )
         result = llm.classify_structured(
@@ -214,22 +302,208 @@ def _try_extract_dates_from_url(url: str, llm: LLMGateway) -> dict | None:
 # ---------------------------------------------------------------------------
 # Pipeline runner
 # ---------------------------------------------------------------------------
+
+def _process_item(db, item, signal_id, schedule: str):
+    """Run one already-deduped item through gates → dedup → verify → score → push.
+
+    Returns (full_event, outcomes). ``outcomes`` names every stat counter to bump;
+    the original counters were cumulative (a brand-new pushed opportunity counted
+    in new *and* verified *and* pushed), and ``llm_errors``/``item_errors`` stay
+    distinct from "no opportunity found" so an outage is never a quiet day.
+    This function does not mutate stats itself.
+    """
+    classification = _classifier.classify(item)
+
+    # Accept both the Classification object and the legacy (category, data) tuple.
+    if isinstance(classification, tuple):
+        classification = Classification(category=classification[0], data=classification[1])
+
+    if classification.failed:
+        logger.error(
+            "[%s] Classification failed for %s (%s): %s",
+            schedule, item.source_name, classification.llm_error,
+            (item.metadata or {}).get("title", "")[:80],
+        )
+        return None, ["llm_errors"]
+
+    if not classification.is_opportunity:
+        return None, []
+
+    structured = classification.data or {}
+    category = classification.category
+    outcomes = ["classified"]
+
+    # --- Phase 3.1: Actionability gate ---
+    # Drop outcome reports and closed windows before the expensive date scrape
+    # below — there is nothing left to apply to.
+    stage = str(structured.get("opportunity_stage") or "").strip().lower().replace(" ", "_")
+    if stage in UNACTIONABLE_STAGES:
+        logger.info(
+            "[%s] Skip %s item from %s: %s",
+            schedule, stage, item.source_name, structured.get("title", "")[:80],
+        )
+        return None, outcomes + ["unactionable"]
+
+    # --- Phase 3.2: Minimum reward gate ---
+    # Drop anything whose stated prize/funding reads as below the floor. Runs
+    # before the date scrape below so a small prize never costs a fetch + LLM
+    # call. A missing or unreadable amount is NOT a small amount: those pass
+    # through and are judged by the scorer instead.
+    amount_usd = parse_amount_usd(structured.get("amount"))
+    if amount_usd is not None and amount_usd < MIN_AMOUNT_USD:
+        logger.info(
+            "[%s] Skip low-amount item from %s (~$%.0f < $%.0f): %s",
+            schedule, item.source_name, amount_usd, MIN_AMOUNT_USD,
+            structured.get("title", "")[:80],
+        )
+        return None, outcomes + ["low_amount"]
+
+    metadata = item.metadata or {}
+    source_tier = str(metadata.get("source_tier") or "discovery")
+
+    # --- Phase 3.5: Secondary date extraction ---
+    # When the initial classification couldn't find a deadline, try scraping the
+    # source URL to extract time-window information.
+    if not _parse_datetime(structured.get("deadline")) and item.raw_url:
+        extra_dates = _try_extract_dates_from_url(item.raw_url, _classifier.llm)
+        if extra_dates:
+            for field in ("published_date", "deadline", "start_date"):
+                val = extra_dates.get(field)
+                if val and not structured.get(field):
+                    structured[field] = val
+            # If we got a published date, also feed it into item metadata so
+            # _published_at can pick it up.
+            pub = extra_dates.get("published_date")
+            if pub and not _published_at(item):
+                item.metadata["published_date"] = pub
+
+    staleness_reason = _staleness_reason(item, structured, source_tier=source_tier)
+    if staleness_reason:
+        logger.info(
+            "[%s] Skip stale item from %s: %s (%s)",
+            schedule, item.source_name, staleness_reason, structured.get("title", "")[:60],
+        )
+        return None, outcomes + ["stale"]
+
+    source_metadata = {
+        "chain": metadata.get("chain"),
+        "source_tier": metadata.get("source_tier"),
+        "official": metadata.get("official"),
+        "signal_type": metadata.get("signal_type"),
+    }
+
+    # --- Phase 4: L2 Semantic Dedup ---
+    event_data = {
+        "event_type": category.lower(),
+        "title": structured.get("title", ""),
+        "description": structured.get("description", ""),
+        "start_date": structured.get("start_date"),
+        "deadline": structured.get("deadline"),
+        "amount": structured.get("amount"),
+        "track": structured.get("track"),
+        "ecosystem": structured.get("ecosystem"),
+        "application_url": structured.get("application_url"),
+        "source_url": item.raw_url,
+        "source_type": item.source_type,
+        "source_platform": structured.get("source_platform") or item.source_name,
+        **source_metadata,
+    }
+
+    event_id, is_new = _deduplicator.check_and_process(
+        db, _persistable_event_data(event_data),
+        source_type=item.source_type,
+        source_name=item.source_name,
+        source_url=item.raw_url,
+        raw_signal_id=signal_id,
+    )
+
+    if not is_new:
+        return None, outcomes + ["deduped"]
+
+    outcomes.append("new")
+
+    # --- Phase 5: Zero-trust Verification ---
+    verification = verify_opportunity(
+        event_type=category.lower(),
+        source_url=item.raw_url,
+        application_url=structured.get("application_url", ""),
+        source_name=item.source_name,
+        metadata=metadata,
+    )
+
+    if verification["verdict"] == "fraud":
+        from src.db.queries import mark_event_fraud
+        mark_event_fraud(db, event_id, verification["verification_log"])
+        return None, outcomes + ["fraud"]
+
+    outcomes.append("verified")
+    event_data["verification_verdict"] = verification["verdict"]
+    event_data["verification_log"] = verification["verification_log"]
+
+    # --- Phase 6: Scoring ---
+    scored = _scorer.score(event_data)
+    if scored:
+        update_event(db, event_id,
+                     is_verified=verification["verdict"] == "verified",
+                     verification_log=verification["verification_log"],
+                     score_roi=scored.get("score_roi"),
+                     score_reputation=scored.get("score_reputation"),
+                     score_timeliness=scored.get("score_timeliness"),
+                     score_strategy=scored.get("score_strategy"),
+                     final_score=scored.get("final_score"),
+                     )
+
+    # --- Phase 7: Push to Slack (if configured, skip dismissed) ---
+    full_event = {**event_data, "id": event_id, **scored} if scored else {**event_data, "id": event_id}
+
+    # is_dismissed lives on the Event row, not in event_data: read it back.
+    dismissed = bool(full_event.get("is_dismissed"))
+    try:
+        event_row = db.query(Event).filter(Event.id == event_id).first()
+        if event_row is not None:
+            dismissed = bool(event_row.is_dismissed)
+    except Exception as e:
+        logger.debug("Could not read is_dismissed for event #%s: %s", event_id, e)
+
+    if dismissed:
+        logger.info("Event #%s is dismissed — skipping Slack push", event_id)
+        return full_event, outcomes
+
+    slack_ts = _slack.push_new_event(full_event)
+
+    if slack_ts:
+        update_event(db, event_id, status="pushed", slack_ts=slack_ts,
+                     slack_channel_id=settings.SLACK_CHANNEL_ID)
+        create_push_log(db, event_id, action="create", slack_ts=slack_ts, success=True)
+        return full_event, outcomes + ["pushed"]
+
+    if _slack.is_configured:
+        # Slack was configured but the push did not land: record the failure
+        # instead of pretending it worked (previously nothing was written).
+        create_push_log(db, event_id, action="create", slack_ts=None, success=False,
+                        error_message="slack_push_failed")
+        logger.error("Slack push failed for event #%s — recorded as a failed push", event_id)
+    return full_event, outcomes
+
+
 def run_pipeline(schedule: str):
     """Run the full pipeline for one schedule type."""
     global _stats_reset_day
 
     _init_components()
+    _reconcile_vector_index_once()
 
     # Reset daily stats if day changed
-    today = datetime.now(timezone.utc).day
-    if today != _stats_reset_day:
+    today = datetime.now(ZoneInfo("Asia/Shanghai")).date()
+    if _stats_reset_day != today:
         reset_daily_stats()
         _stats_reset_day = today
 
     db = SessionLocal()
     log = create_schedule_log(db, f"pipeline_{schedule}")
     stats = {"fetched": 0, "new": 0, "deduped": 0, "classified": 0,
-             "verified": 0, "fraud": 0, "pushed": 0}
+             "unactionable": 0, "low_amount": 0, "stale": 0, "verified": 0,
+             "fraud": 0, "pushed": 0, "llm_errors": 0, "item_errors": 0}
     result = None
 
     try:
@@ -288,123 +562,24 @@ def run_pipeline(schedule: str):
         new_events = []  # collected for report generation
 
         for item, signal_id in l1_results:
-            category, structured = _classifier.classify(item)
-            if category is None or category == "NOISE":
-                continue
-            stats["classified"] += 1
-
-            source_tier = str(item.metadata.get("source_tier", "discovery"))
-
-            # --- Phase 3.5: Secondary date extraction ---
-            # When the initial classification couldn't find a deadline, try
-            # scraping the source URL to extract time-window information.
-            if not _parse_datetime(structured.get("deadline")) and item.raw_url:
-                extra_dates = _try_extract_dates_from_url(item.raw_url, _classifier.llm)
-                if extra_dates:
-                    for field in ("published_date", "deadline"):
-                        val = extra_dates.get(field)
-                        if val and not structured.get(field):
-                            structured[field] = val
-                    # If we got a published date, also feed it into item metadata
-                    # so _published_at can pick it up.
-                    pub = extra_dates.get("published_date")
-                    if pub and not _published_at(item):
-                        item.metadata["published_date"] = pub
-
-            staleness_reason = _staleness_reason(item, structured, source_tier=source_tier)
-            if staleness_reason:
-                logger.info("[%s] Skip stale item from %s: %s", schedule, item.source_name, staleness_reason)
+            try:
+                full_event, outcomes = _process_item(db, item, signal_id, schedule)
+            except Exception as e:
+                # One bad item (malformed LLM value, transient API error) must not
+                # abort the run or be charged against every source's health.
+                stats["item_errors"] = stats.get("item_errors", 0) + 1
+                logger.exception(
+                    "[%s] Item from %s failed and was skipped: %s",
+                    schedule, item.source_name, e,
+                )
                 continue
 
-            source_metadata = {
-                "chain": item.metadata.get("chain"),
-                "source_tier": item.metadata.get("source_tier"),
-                "official": item.metadata.get("official"),
-                "signal_type": item.metadata.get("signal_type"),
-            }
-
-            # --- Phase 4: L2 Semantic Dedup ---
-            event_data = {
-                "event_type": category.lower(),
-                "title": structured.get("title", ""),
-                "description": structured.get("description", ""),
-                "deadline": structured.get("deadline"),
-                "amount": structured.get("amount"),
-                "track": structured.get("track"),
-                "ecosystem": structured.get("ecosystem"),
-                "application_url": structured.get("application_url"),
-                "source_url": item.raw_url,
-                "source_type": item.source_type,
-                "source_platform": structured.get("source_platform") or item.source_name,
-                **source_metadata,
-            }
-
-            event_id, is_new = _deduplicator.check_and_process(
-                db, _persistable_event_data(event_data),
-                source_type=item.source_type,
-                source_name=item.source_name,
-                source_url=item.raw_url,
-                raw_signal_id=signal_id,
-            )
-
-            if not is_new:
-                stats["deduped"] += 1
-                increment_stat("deduped")
-                continue
-
-            stats["new"] += 1
-            increment_stat("new")
-
-            # --- Phase 5: Zero-trust Verification ---
-            verification = verify_opportunity(
-                event_type=category.lower(),
-                source_url=item.raw_url,
-                application_url=structured.get("application_url", ""),
-                source_name=item.source_name,
-                metadata=item.metadata,
-            )
-
-            if verification["verdict"] == "fraud":
-                from src.db.queries import mark_event_fraud
-                mark_event_fraud(db, event_id, verification["verification_log"])
-                stats["fraud"] += 1
-                increment_stat("fraud")
-                continue
-
-            stats["verified"] += 1
-            increment_stat("verified")
-            event_data["verification_verdict"] = verification["verdict"]
-            event_data["verification_log"] = verification["verification_log"]
-
-            # --- Phase 6: Scoring ---
-            scored = _scorer.score(event_data)
-            if scored:
-                update_event(db, event_id,
-                            is_verified=True,
-                            verification_log=verification["verification_log"],
-                            score_roi=scored.get("score_roi"),
-                            score_reputation=scored.get("score_reputation"),
-                            score_timeliness=scored.get("score_timeliness"),
-                            score_strategy=scored.get("score_strategy"),
-                            final_score=scored.get("final_score"),
-                            )
-
-            # --- Phase 7: Push to Slack (if configured) ---
-            full_event = {**event_data, "id": event_id, **scored} if scored else {**event_data, "id": event_id}
-            slack_ts = _slack.push_new_event(full_event)
-
-            if slack_ts:
-                update_event(db, event_id, status="pushed", slack_ts=slack_ts,
-                            slack_channel_id=settings.SLACK_CHANNEL_ID)
-                create_push_log(db, event_id, action="create", slack_ts=slack_ts, success=True)
-                stats["pushed"] += 1
-                increment_stat("pushed")
-            else:
-                # Not pushed via Slack (either not configured or failed)
-                # Event is still recorded for the Markdown report
-                pass
-
-            new_events.append(full_event)
+            for outcome in outcomes:
+                stats[outcome] = stats.get(outcome, 0) + 1
+                if outcome in STAT_INCREMENT_OUTCOMES:
+                    increment_stat(outcome)
+            if full_event is not None:
+                new_events.append(full_event)
 
         # --- Generate and send report only when effective opportunities exist ---
         if new_events:
@@ -420,6 +595,16 @@ def run_pipeline(schedule: str):
         else:
             logger.info(f"[{schedule}] No effective events found; skip Slack cards/report upload")
 
+        if stats.get("llm_errors"):
+            logger.error(
+                "[%s] %d item(s) could NOT be classified — LLM unavailable or unusable "
+                "output. These are NOT 'no opportunity found'.", schedule, stats["llm_errors"],
+            )
+        if stats.get("item_errors"):
+            logger.error(
+                "[%s] %d item(s) failed mid-pipeline and were skipped.", schedule, stats["item_errors"],
+            )
+
         finish_schedule_log(db, log.id, items_fetched=stats["fetched"],
                            items_new=stats["new"], items_deduped=stats["deduped"],
                            items_classified=stats["classified"],
@@ -430,9 +615,9 @@ def run_pipeline(schedule: str):
     except Exception as e:
         logger.exception(f"[{schedule}] Pipeline failed: {e}")
         finish_schedule_log(db, log.id, error=str(e))
-        # Update source health for failed sources
-        for name in _fetcher_registry._fetchers:
-            upsert_source_health(db, name, success=False, error=str(e))
+        # Per-source health is already recorded from the fetch phase. Marking every
+        # registered source as failed here charged one classification/scoring bug
+        # against all ~58 sources and pushed healthy ones to "down" after 3 runs.
         result = {"status": "failed", "error": str(e), **stats}
 
     finally:

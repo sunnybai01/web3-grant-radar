@@ -97,5 +97,8 @@ def test_extract_timeline_rows_and_cursor_from_graphql_payload() -> None:
             "author_screen_name": "gitcoin",
             "quoted_text": "Quoted tweet text",
             "link_urls": ["https://example.org/apply"],
+            # created_at is passed through for the staleness filter; a tweet
+            # without it can only survive on an LLM-extracted deadline.
+            "created_at": None,
         }
     ]

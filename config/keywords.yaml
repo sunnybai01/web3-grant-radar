@@ -119,5 +119,9 @@ keywords:
 # Compilation flags
 flags:
   case_sensitive: false
+  # Retained for backwards compatibility; the filter matches whole terms, not
+  # arbitrary substrings, so this has no effect any more.
   match_partial: true
-  min_keyword_hits: 2 # at least 2 keyword matches to pass coarse filter
+  # Distinct opportunity terms required to reach the LLM. 1 keeps recall wide;
+  # negative keywords only veto when fewer than 2 positive terms are present.
+  min_keyword_hits: 1

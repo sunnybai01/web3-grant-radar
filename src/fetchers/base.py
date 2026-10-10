@@ -10,6 +10,8 @@ from zoneinfo import ZoneInfo
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 import httpx
 
+from config.settings import settings
+
 logger = logging.getLogger(__name__)
 
 # Shanghai timezone for Tavily midnight-bound cooldown
@@ -83,12 +85,15 @@ def get_fetch_skip_reason(
 ) -> Optional[str]:
     """Return a short skip reason when a source is cooling down.
 
-    Cooldown strategies by fetch method:
-    - tavily_search: locked after each successful fetch, auto-unlocks at
-      next midnight (Asia/Shanghai).  Rate-limit and failure cooldowns
-      still apply as usual.
-    - all others: time-based cooldown configured via success_cooldown_minutes,
-      rate_limit_cooldown_minutes, and failure_cooldown_minutes.
+    Cooldown strategies:
+    - any source with `success_cooldown_minutes` set: a successful fetch locks it
+      for that long. Tavily sources ship with this configured (default 5760
+      minutes), which is what keeps the search budget honest.
+    - tavily_search additionally unlocks at midnight (Asia/Shanghai) via the
+      midnight job, so a source whose cooldown has elapsed is not held forever
+      by a stale last_success_at.
+    - rate_limit_cooldown_minutes / failure_cooldown_minutes apply on 429 and
+      repeated failures.
     """
     now = now or dt.datetime.now(dt.timezone.utc)
     fetch_method = config.get("fetch_method", "")
@@ -97,44 +102,58 @@ def get_fetch_skip_reason(
         if now < source_state.cooldown_until:
             return "source_state_cooldown"
 
-    if health is None or health.last_fetch_at is None:
+    if health is None:
         return None
 
     last_error = (getattr(health, "last_error", "") or "").lower()
     rate_limit_cooldown = int(config.get("rate_limit_cooldown_minutes", 0) or 0)
     failure_cooldown = int(config.get("failure_cooldown_minutes", 0) or 0)
 
-    if "429" in last_error and rate_limit_cooldown > 0:
-        retry_at = health.last_fetch_at + dt.timedelta(minutes=rate_limit_cooldown)
+    # The 429 / down-source checks only need a status plus a reference time, so
+    # they must run even when last_fetch_at is NULL (previously the function
+    # returned early and a rate-limited source was retried with no throttle).
+    reference = getattr(health, "last_fetch_at", None)
+
+    if "429" in last_error and rate_limit_cooldown > 0 and reference is not None:
+        retry_at = reference + dt.timedelta(minutes=rate_limit_cooldown)
         if now < retry_at:
             return "rate_limited_cooldown"
 
-    if getattr(health, "status", None) == "down" and failure_cooldown > 0:
-        retry_at = health.last_fetch_at + dt.timedelta(minutes=failure_cooldown)
+    if getattr(health, "status", None) == "down" and failure_cooldown > 0 and reference is not None:
+        # Exponential backoff: the longer a source has been failing, the less
+        # often it is retried (capped by FAILURE_COOLDOWN_MAX_MINUTES).
+        failures = int(getattr(health, "consecutive_failures", 0) or 0)
+        exponent = max(0, failures - 3)
+        cooldown = failure_cooldown * (2 ** exponent)
+        max_cooldown = int(getattr(settings, "FAILURE_COOLDOWN_MAX_MINUTES", 10080) or 0)
+        if max_cooldown > 0:
+            cooldown = min(cooldown, max_cooldown)
+        retry_at = reference + dt.timedelta(minutes=cooldown)
         if now < retry_at:
             return "failed_source_cooldown"
 
-    # ---- Tavily: midnight-bound cooldown ----
-    # A Tavily source that already fetched successfully today is locked
-    # until the next midnight (Asia/Shanghai).  The midnight unlock job
-    # resets last_success_at → NULL to release all Tavily sources at once.
-    if fetch_method == "tavily_search":
-        if getattr(health, "last_success_at", None) is not None:
-            # Compute the next midnight in Asia/Shanghai (UTC+8)
-            shanghai_now = now.astimezone(_SHANGHAI_TZ)
-            today_midnight_shanghai = shanghai_now.replace(
-                hour=0, minute=0, second=0, microsecond=0,
-            )
-            if health.last_success_at >= today_midnight_shanghai:
-                return "tavily_cooldown_until_midnight"
+    last_success_at = getattr(health, "last_success_at", None)
+    if last_success_at is None:
         return None
 
-    # ---- Standard time-based success cooldown ----
+    # ---- Time-based success cooldown (Tavily included) ----
     success_cooldown = int(config.get("success_cooldown_minutes", 0) or 0)
-    if success_cooldown > 0 and getattr(health, "last_success_at", None) is not None:
-        retry_at = health.last_success_at + dt.timedelta(minutes=success_cooldown)
+    if success_cooldown > 0:
+        retry_at = last_success_at + dt.timedelta(minutes=success_cooldown)
         if now < retry_at:
             return "success_cooldown"
+
+    # ---- Tavily: midnight-bound cooldown ----
+    # A Tavily source that already fetched successfully today is locked until the
+    # next midnight (Asia/Shanghai). The midnight job resets last_success_at to
+    # NULL to release all Tavily sources at once.
+    if fetch_method == "tavily_search":
+        shanghai_now = now.astimezone(_SHANGHAI_TZ)
+        today_midnight_shanghai = shanghai_now.replace(
+            hour=0, minute=0, second=0, microsecond=0,
+        )
+        if last_success_at >= today_midnight_shanghai:
+            return "tavily_cooldown_until_midnight"
 
     return None
 
@@ -165,20 +184,49 @@ class BaseFetcher(ABC):
     def close(self):
         self._client.close()
 
+    def _enrich(self, metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Merge this source's chain/tier context into an item's metadata.
+
+        Downstream stages (staleness rules, scoring trust adjustments, zero-trust
+        verification) read source_tier/official/chain/signal_type off the *item*.
+        When fetchers omitted them, ``main`` fell back to "discovery" for every
+        source — which put the 44 official ecosystem sources under the stricter
+        discovery staleness rules, docked their reputation score, and left the
+        verifier without source context.
+        """
+        enriched = dict(metadata or {})
+        config = self.config or {}
+
+        for key in ("chain", "source_tier", "official", "signal_type"):
+            if enriched.get(key) is None and config.get(key) is not None:
+                enriched[key] = config[key]
+
+        return enriched
+
     def _canonicalize_url(self, url: str) -> str:
-        """Resolve redirects and strip tracking params."""
+        """Resolve redirects and strip tracking params.
+
+        The HEAD request is bounded and its failure is logged: this runs once per
+        fetched item, so an un-timed request against a slow host used to stall the
+        whole run (entries x client timeout) with no diagnostic.
+        """
         if not url:
             return ""
+
+        final_url = url
         try:
-            resp = self._client.head(url, follow_redirects=True)
+            resp = self._client.head(url, follow_redirects=True, timeout=5.0)
             final_url = str(resp.url)
-        except Exception:
-            final_url = url
+        except Exception as e:
+            logger.debug("Redirect resolution failed for %s (%s); using the URL as-is", url, e)
 
         # Strip common marketing/tracking query params
         import re
-        final_url = re.sub(r'[?&](utm_source|utm_medium|utm_campaign|utm_content|utm_term|ref|referrer|source)=[^&]*', '', final_url)
-        final_url = re.sub(r'\?$', '', final_url)
+        final_url = re.sub(
+            r'[?&](utm_source|utm_medium|utm_campaign|utm_content|utm_term|ref|referrer|source)=[^&]*',
+            '', final_url,
+        )
+        final_url = re.sub(r'[?&]$', '', final_url)
         return final_url
 
 
