@@ -170,7 +170,11 @@ def trigger_daily_summary() -> DailySummaryTriggerResponse:
     return DailySummaryTriggerResponse(**result)
 
 
-@app.post("/api/v1/chat/select-targets", response_model=SelectTargetsResponse)
+@app.post(
+    "/api/v1/chat/select-targets",
+    response_model=SelectTargetsResponse,
+    dependencies=[Depends(verify_internal_key)],
+)
 def select_targets(payload: SelectTargetsRequest) -> SelectTargetsResponse:
     from . import selection_service
 
