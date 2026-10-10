@@ -7,6 +7,8 @@ import { defineConfig } from "vitest/config";
  * route tests could not even be loaded. Mirror the tsconfig mapping here.
  */
 export default defineConfig({
+  // Next compiles JSX with the automatic runtime; components do not import React.
+  esbuild: { jsx: "automatic" },
   resolve: {
     alias: {
       "@": fileURLToPath(new URL(".", import.meta.url)),

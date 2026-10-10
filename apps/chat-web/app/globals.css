@@ -1,129 +1,147 @@
 @import "tailwindcss";
 @import "@copilotkit/react-ui/styles.css";
 
-:root {
-  --background: 0 0% 100%;
-  --foreground: 240 10% 3.9%;
-  --card: 0 0% 100%;
-  --card-foreground: 240 10% 3.9%;
-  --popover: 0 0% 100%;
-  --popover-foreground: 240 10% 3.9%;
-  --primary: 221.2 83.2% 53.3%;
-  --primary-foreground: 210 40% 98%;
-  --secondary: 240 4.8% 95.9%;
-  --secondary-foreground: 240 5.9% 10%;
-  --muted: 240 4.8% 95.9%;
-  --muted-foreground: 240 3.8% 46.1%;
-  --accent: 240 4.8% 95.9%;
-  --accent-foreground: 240 5.9% 10%;
-  --destructive: 0 84.2% 60.2%;
-  --destructive-foreground: 0 0% 98%;
-  --border: 240 5.9% 90%;
-  --input: 240 5.9% 90%;
-  --ring: 221.2 83.2% 53.3%;
-  --radius: 0.625rem;
-}
+/*
+ * Design tokens, borrowed from the soroban-verification-service console:
+ * ink + white + cool-grey surfaces with a single butter-yellow accent.
+ *
+ * Rules:
+ * - Colour marks a verdict (success / warning / danger) and nothing else.
+ *   Selection, tabs and triage choices stay neutral.
+ * - yellow is for emphasis (focus, selection bar, pill icons), never text on
+ *   white; use yellow-deep when yellow has to be text.
+ * - No raw hex values in components: use these tokens, with opacity modifiers
+ *   (`text-ink/60`) for transparency.
+ */
+@theme {
+  --color-ink: #101828;
+  --color-ink-hover: #1d2939;
+  --color-ink-raised: #344054;
+  --color-ink-body: #4a5565;
+  --color-ink-mute: #6b7280;
 
-.dark {
-  --background: 240 10% 3.9%;
-  --foreground: 0 0% 98%;
-  --card: 240 10% 3.9%;
-  --card-foreground: 0 0% 98%;
-  --popover: 240 10% 3.9%;
-  --popover-foreground: 0 0% 98%;
-  --primary: 217.2 91.2% 59.8%;
-  --primary-foreground: 222.2 47.4% 11.2%;
-  --secondary: 240 3.7% 15.9%;
-  --secondary-foreground: 0 0% 98%;
-  --muted: 240 3.7% 15.9%;
-  --muted-foreground: 240 5% 64.9%;
-  --accent: 240 3.7% 15.9%;
-  --accent-foreground: 0 0% 98%;
-  --destructive: 0 62.8% 30.6%;
-  --destructive-foreground: 0 0% 98%;
-  --border: 240 3.7% 15.9%;
-  --input: 240 3.7% 15.9%;
-  --ring: 221.2 83.2% 53.3%;
+  --color-surface: #ffffff;
+  --color-surface-alt: #f6f7fb;
+  --color-surface-hover: #f1f3f9;
+  --color-surface-track: #eef0f6;
+
+  --color-line: #e5e7eb;
+  --color-line-strong: #d7dae1;
+  --color-line-soft: #eceef2;
+
+  --color-yellow: #f5d35a;
+  --color-yellow-soft: #fbecb4;
+  --color-yellow-pale: #fdf6dd;
+  --color-yellow-deep: #a77d0e;
+
+  --color-success: #14783f;
+  --color-success-surface: #f4fbf6;
+  --color-success-badge: #ecf8f0;
+  --color-warning: #7c4a03;
+  --color-warning-surface: #fdf6dd;
+  --color-warning-badge: #fbf3d3;
+  --color-warning-dot: #d9ad00;
+  --color-danger: #a12222;
+  --color-danger-surface: #fff6f5;
+  --color-danger-badge: #fdeeee;
+  --color-neutral-badge: #e8ebf2;
+
+  --shadow-panel: 0 1px 2px rgba(16, 24, 40, 0.04), 0 10px 30px rgba(16, 24, 40, 0.06);
+  --shadow-dropdown: 0 18px 50px rgba(16, 24, 40, 0.12);
+  --shadow-focus: 0 0 0 3px rgba(245, 211, 90, 0.45);
+  --shadow-selected: inset 3px 0 0 #f5d35a, 0 1px 2px rgba(16, 24, 40, 0.06);
+
+  --animate-arrow-slide: arrow-slide 0.4s ease;
+  --animate-shimmer: shimmer 1.4s ease-in-out infinite;
+
+  @keyframes arrow-slide {
+    0% { transform: translateX(0); opacity: 1; }
+    45% { transform: translateX(10px); opacity: 0; }
+    55% { transform: translateX(-10px); opacity: 0; }
+    100% { transform: translateX(0); opacity: 1; }
+  }
+
+  @keyframes shimmer {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.45; }
+  }
 }
 
 @theme inline {
-  --color-background: hsl(var(--background));
-  --color-foreground: hsl(var(--foreground));
-  --color-card: hsl(var(--card));
-  --color-card-foreground: hsl(var(--card-foreground));
-  --color-popover: hsl(var(--popover));
-  --color-popover-foreground: hsl(var(--popover-foreground));
-  --color-primary: hsl(var(--primary));
-  --color-primary-foreground: hsl(var(--primary-foreground));
-  --color-secondary: hsl(var(--secondary));
-  --color-secondary-foreground: hsl(var(--secondary-foreground));
-  --color-muted: hsl(var(--muted));
-  --color-muted-foreground: hsl(var(--muted-foreground));
-  --color-accent: hsl(var(--accent));
-  --color-accent-foreground: hsl(var(--accent-foreground));
-  --color-destructive: hsl(var(--destructive));
-  --color-destructive-foreground: hsl(var(--destructive-foreground));
-  --color-border: hsl(var(--border));
-  --color-input: hsl(var(--input));
-  --color-ring: hsl(var(--ring));
-  --radius-sm: calc(var(--radius) - 0.5rem);
-  --radius-md: calc(var(--radius) - 0.25rem);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 0.5rem);
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, "SFMono-Regular", Menlo, monospace;
 }
 
-* {
-  border-color: hsl(var(--border));
+@layer base {
+  *,
+  ::before,
+  ::after {
+    border-color: var(--color-line);
+  }
+
+  body {
+    min-height: 100vh;
+    background-color: var(--color-surface-alt);
+    /* Faint static dot grid, the console's background texture. */
+    background-image: radial-gradient(rgba(16, 24, 40, 0.07) 1px, transparent 1px);
+    background-size: 18px 18px;
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  :focus-visible {
+    outline: none;
+    box-shadow: var(--shadow-focus);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    ::before,
+    ::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
 }
 
-html {
-  scroll-behavior: smooth;
-}
-
-body {
-  min-height: 100vh;
-  background: hsl(var(--background));
-  color: hsl(var(--foreground));
-  font-family: "SF Pro Display", "Inter", "Segoe UI", sans-serif;
-}
-
-/* CopilotKit v2 theming — v2 reads token vars from [data-copilotkit],
-   not the legacy --copilot-kit-* variables. Map them to our design tokens. */
+/* ---------------------------------------------------------------------------
+ * CopilotKit: map its tokens onto ours. v2 reads token vars from
+ * [data-copilotkit]; the --copilot-kit-* names are for v1 surfaces.
+ * ------------------------------------------------------------------------- */
 [data-copilotkit] {
-  --background: hsl(var(--card));
-  --foreground: hsl(var(--foreground));
-  --primary: hsl(var(--primary));
-  --primary-foreground: hsl(var(--primary-foreground));
-  --muted: hsl(var(--muted-foreground));
-  --border: hsl(var(--border));
-  --ring: hsl(var(--ring));
-  --radius: 0.625rem;
+  --background: var(--color-surface);
+  --foreground: var(--color-ink);
+  --primary: var(--color-ink);
+  --primary-foreground: var(--color-surface);
+  --muted: var(--color-ink-mute);
+  --border: var(--color-line);
+  --ring: var(--color-yellow);
+  --radius: 0.5rem;
 
-  /* Legacy v1 vars kept for any v1 surfaces still in play */
-  --copilot-kit-primary-color: hsl(var(--primary));
-  --copilot-kit-contrast-color: hsl(var(--primary-foreground));
-  --copilot-kit-background-color: hsl(var(--card));
-  --copilot-kit-secondary-color: hsl(var(--background));
-  --copilot-kit-separator-color: hsl(var(--border));
-  --copilot-kit-muted-color: hsl(var(--muted-foreground));
+  --copilot-kit-primary-color: var(--color-ink);
+  --copilot-kit-contrast-color: var(--color-surface);
+  --copilot-kit-background-color: var(--color-surface);
+  --copilot-kit-secondary-color: var(--color-surface-alt);
+  --copilot-kit-separator-color: var(--color-line);
+  --copilot-kit-muted-color: var(--color-ink-mute);
 }
 
 .copilotKitChat {
   width: 100%;
   height: 100%;
   background: transparent;
-  font-family: "SF Pro Display", "Inter", "Segoe UI", sans-serif;
+  font-family: var(--font-sans);
 }
 
-/* Roomier message column */
 .copilotKitMessages {
-  padding: 1.25rem 1.5rem;
+  padding: 1rem 0.25rem;
 }
 
 .copilotKitMessage {
-  font-size: 0.9375rem;
+  font-size: 0.875rem;
   line-height: 1.6;
-  border-radius: 0.625rem;
+  border-radius: 0.5rem;
 }
 
 .copilotKitMessage.copilotKitAssistantMessage {
@@ -132,15 +150,14 @@ body {
 }
 
 .copilotKitMessage.copilotKitUserMessage {
-  background: hsl(var(--primary));
-  color: hsl(var(--primary-foreground));
+  background: var(--color-ink);
+  color: var(--color-surface);
   border-radius: 0.75rem 0.75rem 0.25rem 0.75rem;
-  padding: 0.625rem 0.9375rem;
+  padding: 0.5rem 0.875rem;
 }
 
-/* Tool-call / action renders: nuke ALL oversized SVGs in the CopilotKit tree.
-   Some tool-call icons are rendered outside .copilotKitMessage by generative UI,
-   so we target the entire [data-copilotkit] container with !important. */
+/* Tool-call renders ship oversized SVGs; clamp everything inside the chat,
+   then let the send button and labelled chrome size themselves. */
 [data-copilotkit] svg {
   max-width: 1em !important;
   max-height: 1em !important;
@@ -148,7 +165,6 @@ body {
   height: 1em !important;
 }
 
-/* Exception: the send-button icon and any explicitly sized chat UI chrome */
 [data-copilotkit] .copilotKitSendButton svg,
 [data-copilotkit] button[aria-label] svg {
   width: auto !important;
@@ -157,28 +173,24 @@ body {
   max-height: none !important;
 }
 
-/* Tool-call chevron icon — rendered OUTSIDE [data-copilotkit] by CopilotKit's
-   generative UI (subComponent), so we target the stable data-testid directly. */
 [data-testid="copilot-tool-render"] svg {
   width: 0.875rem !important;
   height: 0.875rem !important;
   flex-shrink: 0;
 }
 
-/* Give agent-state / tool renders a card-like frame so they don't float */
-.copilotKitMessage [data-message-role="tool"],
 .copilotKitToolCall,
 .copilotKitAgentStateRender {
-  border: 1px solid hsl(var(--border));
-  border-radius: 0.875rem;
-  background: hsl(var(--background));
+  border: 1px solid var(--color-line);
+  border-radius: 0.5rem;
+  background: var(--color-surface-alt);
   padding: 0.5rem 0.75rem;
   margin-block: 0.375rem;
-  font-size: 0.8125rem;
-  color: hsl(var(--muted-foreground));
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--color-ink-body);
 }
 
-/* Markdown polish */
 .copilotKitMessagesContainer,
 .copilotKitMessages,
 .copilotKitMessage,
@@ -189,84 +201,65 @@ body {
   word-break: break-word;
 }
 
-.copilotKitMarkdown img,
-.copilotKitMarkdownElement img {
-  max-width: 100%;
-  height: auto;
-  border-radius: 0.75rem;
-}
-
-.copilotKitMarkdown hr {
-  padding: 1rem 0;
-}
-
 .copilotKitMarkdown blockquote,
 .copilotKitMarkdownElement blockquote {
   margin: 0.75rem 0;
   padding-left: 0.75rem;
-  border-left: 3px solid hsl(var(--primary));
-  color: hsl(var(--muted-foreground));
+  border-left: 3px solid var(--color-yellow);
+  color: var(--color-ink-body);
 }
 
-/* Tables rendered inside markdown responses */
 .copilotKitMarkdown table,
 .copilotKitMarkdownElement table {
   width: 100%;
   border-collapse: collapse;
   margin: 0.75rem 0;
-  font-size: 0.875rem;
-  border: 1px solid hsl(var(--border));
-  border-radius: 0.75rem;
-  overflow: hidden;
+  font-size: 0.8125rem;
+  border: 1px solid var(--color-line);
 }
 
 .copilotKitMarkdown th,
 .copilotKitMarkdownElement th {
-  background: hsl(var(--muted));
+  background: var(--color-surface-alt);
   text-align: left;
   font-weight: 600;
-  padding: 0.5rem 0.75rem;
+  padding: 0.4rem 0.6rem;
 }
 
 .copilotKitMarkdown td,
 .copilotKitMarkdownElement td {
-  padding: 0.5rem 0.75rem;
-  border-top: 1px solid hsl(var(--border));
+  padding: 0.4rem 0.6rem;
+  border-top: 1px solid var(--color-line);
   vertical-align: top;
 }
 
 .copilotKitMarkdown code,
 .copilotKitMarkdownElement code {
-  background: hsl(var(--muted));
-  border-radius: 0.375rem;
+  font-family: var(--font-mono);
+  background: var(--color-surface-alt);
+  border-radius: 0.25rem;
   padding: 0.1rem 0.35rem;
   font-size: 0.85em;
 }
 
-/* Composer / input */
 .copilotKitInput {
-  border-radius: 1.25rem;
-  border: 1px solid hsl(var(--border));
-  background: hsl(var(--card));
-  margin: 0 1rem 1rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--color-line-strong);
+  background: var(--color-surface);
+  margin: 0 0 0.25rem;
+}
+
+.copilotKitInput:focus-within {
+  border-color: var(--color-ink);
+  box-shadow: var(--shadow-focus);
 }
 
 .copilotKitInput .copilotKitSendButton {
-  background: hsl(var(--primary));
-  color: hsl(var(--primary-foreground));
+  background: var(--color-ink);
+  color: var(--color-surface);
   border-radius: 9999px;
 }
 
 .copilotKitInput .copilotKitSendButton:disabled {
-  opacity: 0.5;
-}
-
-/* Scrollbar */
-.copilotKitMessages::-webkit-scrollbar {
-  width: 8px;
-}
-
-.copilotKitMessages::-webkit-scrollbar-thumb {
-  background-color: hsl(var(--border));
-  border-radius: 4px;
+  opacity: 0.4;
 }

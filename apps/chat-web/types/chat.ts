@@ -110,39 +110,80 @@ export type InvestigationResponse = {
   error: string;
 };
 
+export type TriageStatus = "new" | "shortlisted" | "dismissed";
+export type TriageTab = TriageStatus | "all";
+export type OpportunitySort = "score" | "deadline" | "newest";
+export type SourceTrust = "official" | "discovery";
+
+export type OpportunityScores = {
+  roi: number | null;
+  reputation: number | null;
+  timeliness: number | null;
+  strategy: number | null;
+};
+
 export type DashboardOpportunityItem = {
   id: number;
   score: number | null;
+  scores: OpportunityScores;
   type: string;
   title: string;
+  summary: string;
   ecosystem: string | null;
   amount: string | null;
-  deadline: string;
+  /** ISO-8601, or null for rolling programmes. */
+  deadline: string | null;
+  first_seen: string | null;
   heat: number;
+  source_count: number;
   verified: boolean;
-  source_trust: string;
   verification_verdict: string;
+  source_trust: SourceTrust | string;
   apply_url: string;
-  is_dismissed: boolean;
+  triage_status: TriageStatus;
 };
 
-export type DashboardOpportunityMetrics = {
-  total_shown: number;
-  avg_score: number;
-  verified_percent: number;
-  /** Events whose verification verdict is "verified". */
-  verified_count?: number;
-  /** Events with verdict "unchecked": no security provider answered for them. */
-  unchecked_count?: number;
-  grants: number;
-  hackathons: number;
-  official: number;
-  discovery: number;
+export type DashboardOpportunitySource = {
+  name: string;
+  type: string;
+  url: string;
+  fetched_at: string | null;
 };
+
+export type DashboardOpportunityDetail = DashboardOpportunityItem & {
+  description: string;
+  sources: DashboardOpportunitySource[];
+};
+
+/** Whole-board stats; they ignore the list filters. */
+export type DashboardOpportunityMetrics = {
+  to_review: number;
+  shortlisted: number;
+  closing_soon: number;
+  verified_percent: number;
+  verified_count: number;
+  unchecked_count: number;
+  total: number;
+};
+
+export type DashboardOpportunityCounts = Record<TriageTab, number>;
 
 export type DashboardOpportunitiesResponse = {
   metrics: DashboardOpportunityMetrics;
+  counts: DashboardOpportunityCounts;
+  ecosystems: string[];
+  next_scan_at: string | null;
   items: DashboardOpportunityItem[];
+};
+
+export type OpportunityFilters = {
+  status: TriageTab;
+  type: "all" | "grant" | "hackathon";
+  trust: "all" | SourceTrust;
+  ecosystem: string;
+  q: string;
+  sort: OpportunitySort;
+  closingSoon: boolean;
 };
 
 export type DeleteOpportunityResponse = {
@@ -151,17 +192,13 @@ export type DeleteOpportunityResponse = {
   deleted: boolean;
 };
 
-export type DismissEventResponse = {
-  status: string;
-  event_id: number;
-  is_dismissed: boolean;
-};
-
 export type DashboardSourceHealthItem = {
   source: string;
   status: string;
   last_success: string;
   last_fetch: string;
+  last_success_at: string | null;
+  last_fetch_at: string | null;
   failures: number;
   last_error: string;
 };
@@ -183,6 +220,7 @@ export type DashboardScheduleLogItem = {
   job: string;
   status: string;
   started: string;
+  started_at: string | null;
   fetched: number;
   new: number;
   deduped: number;
