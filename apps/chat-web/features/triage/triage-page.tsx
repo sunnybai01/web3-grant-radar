@@ -115,8 +115,10 @@ export function TriagePage() {
   ) : null;
 
   return (
-    <main className="mx-auto w-full max-w-[1440px] px-4 pt-6 pb-10 md:px-8">
-      <div className="mb-5 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+    // On desktop the page fits the viewport below the 57px top bar: the list and
+    // the detail scroll on their own instead of the whole page scrolling.
+    <main className="mx-auto w-full max-w-[1440px] px-4 pt-6 pb-10 md:px-8 lg:flex lg:h-[calc(100dvh-57px)] lg:flex-col lg:pb-6">
+      <div className="mb-5 flex shrink-0 flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <Eyebrow>{copy.triage.eyebrow}</Eyebrow>
           <h1 className="mt-1 text-[1.6rem] leading-tight font-bold tracking-tight text-ink">{copy.triage.title}</h1>
@@ -125,8 +127,8 @@ export function TriagePage() {
         <HeaderStats metrics={listing.data?.metrics} filters={filters} onFilter={setFilters} />
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] lg:items-start">
-        <div className="lg:sticky lg:top-[4.5rem] lg:flex lg:h-[calc(100vh-6rem)] lg:flex-col">
+      <div className="grid gap-4 lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
+        <div className="lg:flex lg:min-h-0 lg:flex-col">
           <OpportunityList
             ref={searchRef}
             data={listing.data}
@@ -144,7 +146,7 @@ export function TriagePage() {
         </div>
 
         {isDesktop ? (
-          <Panel className="p-5 lg:sticky lg:top-[4.5rem] lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto">
+          <Panel className="p-5 lg:min-h-0 lg:overflow-y-auto">
             {detail ??
               (listing.isLoading ? (
                 <div className="space-y-3">
