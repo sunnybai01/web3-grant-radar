@@ -125,11 +125,21 @@ docker compose exec -T pipeline python scripts/inspect_vector_db.py
 
 处理状态迁移（给 `events` 表加 `triage_status` / `triaged_at` 字段，并把原来已忽略的记录回填为 `dismissed`）。**升级到带处理状态的版本前必须先执行**，否则 pipeline 和 chat-api 启动后查询会报字段不存在。脚本可以重复执行：
 
+旧容器的镜像里还没有这个脚本，所以要先构建新镜像，用一次性容器执行迁移，再启动服务：
+
 ```bash
-docker compose exec -T pipeline python -m scripts.migrate_events_triage_status
+docker compose build pipeline chat-api
 ```
 
-部署顺序：先执行上面的迁移，再重建 `pipeline` 和 `chat-api`，最后部署前端。
+```bash
+docker compose run --rm pipeline python -m scripts.migrate_events_triage_status
+```
+
+```bash
+docker compose up -d --remove-orphans
+```
+
+最后再部署前端。
 
 其他数据迁移和清理脚本见 `scripts/`，各脚本顶部的 docstring 写明了用法。
 

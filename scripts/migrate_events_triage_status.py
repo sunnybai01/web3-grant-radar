@@ -10,7 +10,8 @@ previous release still sees the same dismissals.
 
 Idempotent — safe to run repeatedly:
 
-    docker exec grant_radar_pipeline python -m scripts.migrate_events_triage_status
+    docker compose build pipeline chat-api
+    docker compose run --rm pipeline python -m scripts.migrate_events_triage_status
 """
 from sqlalchemy import text
 
