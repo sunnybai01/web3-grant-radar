@@ -1,0 +1,69 @@
+flowchart LR
+    subgraph signals["Signal Sources"]
+        rss["RSS and official websites"]
+        scrape["Web scraping"]
+        tavily["Tavily search"]
+        github["GitHub issue search"]
+        social["X / Twitter (Twikit)"]
+    end
+
+    subgraph pipeline["Python Pipeline · APScheduler"]
+        fetch["1. Fetch and normalize"]
+        urlDedup["2. L1 canonical URL dedup"]
+        classify["3. Classify and apply gates"]
+        semanticDedup{"4. L2 semantic dedup"}
+        mergeExisting["Merge into existing event"]
+        verifyScore["5. Verify and score"]
+        persistDeliver["6. Persist and deliver"]
+        fetch --> urlDedup --> classify --> semanticDedup
+        semanticDedup -->|"New candidate"| verifyScore --> persistDeliver
+        semanticDedup -->|"Existing event"| mergeExisting
+    end
+
+    subgraph integrations["External Integrations"]
+        llm["LLM providers: DeepSeek, Qwen, Gemini"]
+        risk["Trust and risk APIs: GoPlus, CertiK, ScamSniffer"]
+        slack["Slack: cards, reports, daily summary"]
+    end
+
+    subgraph appdata["Dashboard, Data and Runtime"]
+        dashboard["Next.js triage dashboard · apps/chat-web"]
+        api["FastAPI chat-api · 127.0.0.1:8000"]
+        postgres["PostgreSQL: events, raw signals, source health, logs"]
+        chroma["ChromaDB: L2 semantic vector index"]
+        compose["Docker Compose: pipeline, chat-api, postgres, chromadb"]
+        webRuntime["Frontend runtime: pnpm dev or Vercel"]
+    end
+
+    rss -->|"Opportunity signals"| fetch
+    scrape -->|"Opportunity signals"| fetch
+    tavily -->|"Search results"| fetch
+    github -->|"Issue signals"| fetch
+    social -->|"Social signals"| fetch
+
+    classify -.->|"LLM classification and fallback"| llm
+    verifyScore -.->|"Origin and risk verification"| risk
+    persistDeliver -.->|"Qualified opportunity cards and reports"| slack
+
+    semanticDedup -->|"Embeddings and lookup"| chroma
+    mergeExisting -->|"Merge event and source data"| postgres
+    fetch -->|"Source health"| postgres
+    persistDeliver -->|"Qualified events and run logs"| postgres
+
+    dashboard -->|"Dashboard API"| api
+    api -->|"Queries and triage decisions"| postgres
+    api -.->|"Manual scan and operations"| fetch
+    webRuntime -.->|"Runs"| dashboard
+    compose -.->|"Runs"| api
+    compose -.->|"Runs"| postgres
+    compose -.->|"Runs"| chroma
+    compose -.->|"Runs"| persistDeliver
+
+    classDef source fill:#eaf8f5,stroke:#168c84,color:#173b3b,stroke-width:1px;
+    classDef pipelineNode fill:#f2efff,stroke:#7b61c9,color:#2a2350,stroke-width:1px;
+    classDef externalNode fill:#fff4e9,stroke:#df974b,color:#573a1b,stroke-width:1px;
+    classDef appNode fill:#eef5ff,stroke:#5289cf,color:#1f3b5b,stroke-width:1px;
+    class rss,scrape,tavily,github,social source;
+    class fetch,urlDedup,classify,semanticDedup,mergeExisting,verifyScore,persistDeliver pipelineNode;
+    class llm,risk,slack externalNode;
+    class dashboard,api,postgres,chroma,compose,webRuntime appNode;
