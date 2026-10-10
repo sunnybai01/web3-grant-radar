@@ -5,7 +5,7 @@ import { Providers } from "./providers";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Signal Room",
+  title: "Web3 Grant Radar",
   description:
     "Copilot-powered database verification workspace for Web3 opportunities",
 };

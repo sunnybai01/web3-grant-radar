@@ -7,7 +7,7 @@ changed page back in; L2 semantic dedup still catches genuine reposts.
 
 Idempotent — safe to run repeatedly. Run before deploying the matching code:
 
-    docker exec web3_agent_main python -m scripts.migrate_raw_signals_content_hash
+    docker exec grant_radar_pipeline python -m scripts.migrate_raw_signals_content_hash
 """
 import sys
 

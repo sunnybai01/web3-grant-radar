@@ -1,7 +1,11 @@
+# Pinned so the pgdata / chroma_data volumes keep resolving to
+# web3-automated-agent_* even if the checkout directory is renamed.
+name: web3-automated-agent
+
 services:
   chat-api:
     build: .
-    container_name: web3_agent_chat_api
+    container_name: grant_radar_chat_api
     env_file:
       - .env
     depends_on:
@@ -12,9 +16,9 @@ services:
     ports:
       - "127.0.0.1:8000:8000"
 
-  agent-app:
+  pipeline:
     build: .
-    container_name: web3_agent_main
+    container_name: grant_radar_pipeline
     env_file:
       - .env
     environment:
@@ -29,7 +33,7 @@ services:
 
   postgres:
     image: pgvector/pgvector:pg16
-    container_name: web3_agent_postgres
+    container_name: grant_radar_postgres
     ports:
       - "127.0.0.1:5432:5432"
     environment:
@@ -46,7 +50,7 @@ services:
 
   chromadb:
     image: chromadb/chroma:latest
-    container_name: web3_agent_chromadb
+    container_name: grant_radar_chromadb
     ports:
       - "127.0.0.1:8001:8000"
     volumes:

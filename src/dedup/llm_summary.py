@@ -39,6 +39,16 @@ def format_summary_text(s: dict) -> str:
     return " | ".join(parts)
 
 
+def raw_embedding_text(title: str, description: str) -> str:
+    """Deterministic embedding text with no LLM call.
+
+    Used for bulk re-indexing (startup reconciliation, post-reset backfill) where
+    one summary request per Event is not worth the seconds it costs, and where the
+    LLM being down must not leave the index empty.
+    """
+    return f"{title} {description}".strip()[:2000]
+
+
 class LLMSummaryExtractor:
     """Extract structured summaries for dedup embedding.
 
@@ -99,4 +109,4 @@ class LLMSummaryExtractor:
                 return text
 
         # Fallback: raw text
-        return f"{title} {description}"[:2000]
+        return raw_embedding_text(title, description)

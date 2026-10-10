@@ -1,4 +1,4 @@
-# Web3 Intelligence Agent — Seed Source Configuration
+# Web3 Grant Radar — Seed Source Configuration
 # Each source defines: type, url, fetch_method, schedule, keywords, ecosystem.
 # Chain-aware metadata is now supported:
 # - chain: canonical ecosystem id used by downstream registry-aware logic

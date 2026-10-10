@@ -143,11 +143,17 @@ def get_fetch_skip_reason(
         if now < retry_at:
             return "success_cooldown"
 
-    # ---- Tavily: midnight-bound cooldown ----
-    # A Tavily source that already fetched successfully today is locked until the
-    # next midnight (Asia/Shanghai). The midnight job resets last_success_at to
-    # NULL to release all Tavily sources at once.
-    if fetch_method == "tavily_search":
+    # ---- Tavily: midnight-bound cooldown (fallback only) ----
+    # A Tavily source that already fetched successfully today stays locked until
+    # the next midnight (Asia/Shanghai), where the midnight job clears
+    # last_success_at for every Tavily source.
+    #
+    # This only applies when the source has NO explicit success cooldown. With one
+    # configured, the cooldown above already decides the rate and the midnight rule
+    # would silently cap the source at one run per day: a 21:00 run is always before
+    # midnight, so every source that succeeded at 09:00 was skipped no matter how
+    # short its cooldown was.
+    if fetch_method == "tavily_search" and success_cooldown <= 0:
         shanghai_now = now.astimezone(_SHANGHAI_TZ)
         today_midnight_shanghai = shanghai_now.replace(
             hour=0, minute=0, second=0, microsecond=0,
@@ -174,7 +180,7 @@ class BaseFetcher(ABC):
         self._client = http_client or httpx.Client(
             timeout=30.0,
             follow_redirects=True,
-            headers={"User-Agent": "Web3-Agent/1.0 (+https://github.com)"},
+            headers={"User-Agent": "Web3GrantRadar/1.0 (+https://github.com)"},
         )
 
     @abstractmethod
@@ -238,7 +244,7 @@ class FetcherRegistry:
         self._http_client = httpx.Client(
             timeout=30.0,
             follow_redirects=True,
-            headers={"User-Agent": "Web3-Agent/1.0"},
+            headers={"User-Agent": "Web3GrantRadar/1.0"},
         )
 
     def register(self, name: str, fetcher: BaseFetcher):

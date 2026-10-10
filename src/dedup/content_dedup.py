@@ -90,8 +90,18 @@ class ContentDeduplicator:
         return self.llm.get_embedding_text(title or "", description or "")
 
     def embedding_text_for_event(self, event: Event) -> str:
-        """Text that gets embedded for an already stored Event (re-indexing)."""
-        return self.embedding_text(event.title or "", event.description or "")
+        """Text that gets embedded for an already stored Event (re-indexing).
+
+        Deliberately does NOT call the LLM. Re-indexing is a bulk operation (every
+        live Event, on startup and after a vector reset), and one summary call per
+        Event turned reconciliation into a multi-minute stall in front of the
+        pipeline. Stored Events already carry the classifier's own title and
+        description, which is what the LLM summary would have been derived from.
+        The matched text stays semantically equivalent; the previous behaviour was
+        also inconsistent, since an Event whose summary call failed fell back to
+        exactly this text anyway.
+        """
+        return raw_embedding_text(event.title or "", event.description or "")
 
     # -- match window -------------------------------------------------------
 

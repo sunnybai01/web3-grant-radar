@@ -24,12 +24,15 @@ def test_twitter_settings_have_safe_defaults(isolated_defaults) -> None:
     assert settings.TWITTER_FETCH_COUNT == 20
 
 
-def test_tavily_cooldown_has_safe_default(isolated_defaults) -> None:
-    """README documents 5760 minutes (4 days) and 1 source per run."""
+def test_tavily_budget_yields_two_searches_per_source_per_day(isolated_defaults) -> None:
+    """grant_hackathon runs at 09:00 and 21:00, so the cooldown must be shorter
+    than that 12h gap; with the budget covering every enabled source each source
+    is searched exactly twice a day."""
     settings = Settings()
 
-    assert settings.TAVILY_SUCCESS_COOLDOWN_MINUTES == 5760
-    assert settings.TAVILY_MAX_SOURCES_PER_RUN == 1
+    assert settings.TAVILY_SUCCESS_COOLDOWN_MINUTES < 12 * 60
+    assert settings.TAVILY_SUCCESS_COOLDOWN_MINUTES == 660
+    assert settings.TAVILY_MAX_SOURCES_PER_RUN == 14
 
 
 def test_daily_summary_settings_have_safe_defaults(isolated_defaults) -> None:

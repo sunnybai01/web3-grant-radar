@@ -6,7 +6,7 @@ opportunity stated an opening date but no deadline.
 
 Idempotent — safe to run repeatedly:
 
-    docker exec web3_agent_main python -m scripts.migrate_events_start_date
+    docker exec grant_radar_pipeline python -m scripts.migrate_events_start_date
 """
 from sqlalchemy import text
 

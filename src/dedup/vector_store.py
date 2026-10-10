@@ -35,17 +35,45 @@ class VectorStore:
             metadata={"hnsw:space": "cosine"},
         )
 
+    def _ensure_collection(self):
+        """Refresh the cached collection handle if it no longer exists.
+
+        Dropping and recreating a collection (which the dedup reset used to do)
+        invalidates every other process's cached handle: the next query fails with
+        "Collection [uuid] does not exist", which took out 40 items in one run.
+        Recovery is possible because the collection is addressed by name.
+        """
+        if self._collection_exists(self._collection):
+            return self._collection
+        logger.warning(
+            "Vector collection '%s' was dropped elsewhere — re-resolving by name",
+            self.COLLECTION_NAME,
+        )
+        self._collection = self._client.get_or_create_collection(
+            name=self.COLLECTION_NAME,
+            metadata={"hnsw:space": "cosine"},
+        )
+        return self._collection
+
+    @staticmethod
+    def _collection_exists(collection) -> bool:
+        try:
+            collection.count()
+            return True
+        except Exception:
+            return False
+
     def count(self) -> int:
         """Number of indexed documents. Raises VectorStoreError when unreachable."""
         try:
-            return int(self._collection.count())
+            return int(self._ensure_collection().count())
         except Exception as e:
             raise VectorStoreError(f"ChromaDB count failed: {e}") from e
 
     def existing_ids(self) -> set[str]:
         """All document ids currently indexed (used for reconciliation)."""
         try:
-            result = self._collection.get(include=[])
+            result = self._ensure_collection().get(include=[])
         except Exception as e:
             raise VectorStoreError(f"ChromaDB get failed: {e}") from e
         return set(result.get("ids") or [])
@@ -57,7 +85,7 @@ class VectorStore:
         of failing, so the startup reconciliation can be run repeatedly.
         """
         try:
-            self._collection.upsert(
+            self._ensure_collection().upsert(
                 ids=[doc_id],
                 documents=[text],
                 metadatas=[metadata or {}],
@@ -78,7 +106,7 @@ class VectorStore:
         for "no duplicates found".
         """
         try:
-            results = self._collection.query(
+            results = self._ensure_collection().query(
                 query_texts=[text],
                 n_results=n_results,
                 where=where,
@@ -101,7 +129,7 @@ class VectorStore:
 
     def delete(self, doc_id: str):
         try:
-            self._collection.delete(ids=[doc_id])
+            self._ensure_collection().delete(ids=[doc_id])
         except Exception as e:
             logger.error(f"ChromaDB delete failed for {doc_id}: {e}")
 
@@ -110,24 +138,35 @@ class VectorStore:
         if not doc_ids:
             return
         try:
-            self._collection.delete(ids=doc_ids)
+            self._ensure_collection().delete(ids=doc_ids)
             logger.info(f"ChromaDB batch delete: {len(doc_ids)} vectors removed")
         except Exception as e:
             raise VectorStoreError(f"ChromaDB batch delete failed: {e}") from e
 
     def clear_all(self):
-        """Drop and recreate the collection, removing all vectors."""
-        try:
-            self._client.delete_collection(name=self.COLLECTION_NAME)
-            logger.info(f"ChromaDB collection '{self.COLLECTION_NAME}' deleted")
-        except Exception:
-            logger.warning("ChromaDB collection delete failed (may not exist)")
+        """Remove all vectors while keeping the collection alive.
 
-        self._collection = self._client.get_or_create_collection(
-            name=self.COLLECTION_NAME,
-            metadata={"hnsw:space": "cosine"},
-        )
-        logger.info("ChromaDB collection recreated — all vectors cleared")
+        This deliberately does NOT drop the collection: other processes hold a
+        reference to it by uuid, and dropping it made their next query fail with
+        "Collection [...] does not exist" instead of simply matching nothing.
+        """
+        collection = self._ensure_collection()
+        try:
+            existing = collection.get(include=[])
+            ids = list(existing.get("ids") or [])
+        except Exception as e:
+            raise VectorStoreError(f"ChromaDB get failed while clearing: {e}") from e
+
+        if not ids:
+            logger.info("ChromaDB collection '%s' already empty", self.COLLECTION_NAME)
+            return
+
+        try:
+            # delete() with no ids is a no-op on some server versions, so pass them.
+            collection.delete(ids=ids)
+            logger.info("ChromaDB cleared: %d vector(s) removed", len(ids))
+        except Exception as e:
+            raise VectorStoreError(f"ChromaDB clear failed: {e}") from e
 
     def purge_older_than(self, days: int):
         """Remove vectors older than N days (sliding window cleanup).

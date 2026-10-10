@@ -42,7 +42,7 @@ export default function CopilotDrawer({
             </div>
             <div>
               <h2 className="text-xl font-semibold tracking-[-0.03em] text-foreground">
-                {opportunity?.title ?? "Signal Room Copilot"}
+                {opportunity?.title ?? "Grant Radar Copilot"}
               </h2>
               <p className="text-sm text-muted-foreground">
                 {opportunity
@@ -61,7 +61,7 @@ export default function CopilotDrawer({
             <CopilotChat
               className="h-full"
               labels={{
-                title: "Signal Room Copilot",
+                title: "Grant Radar Copilot",
                 initial:
                   "Ask about the selected opportunity, compare it against others in the visible table, or request a deeper prioritization rationale.",
                 placeholder:

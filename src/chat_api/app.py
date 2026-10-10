@@ -24,7 +24,7 @@ from .schemas import (
     VerifyResponse,
 )
 
-app = FastAPI(title="Web3 Agent Chat API", version="v1")
+app = FastAPI(title="Web3 Grant Radar API", version="v1")
 
 
 @app.get("/api/v1/chat/health", response_model=HealthResponse)
