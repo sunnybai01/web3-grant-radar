@@ -90,12 +90,19 @@ def delete_event(db: Session, event_id: int) -> Optional[Event]:
     return event
 
 
-def dismiss_event(db: Session, event_id: int, dismissed: bool = True) -> Optional[Event]:
-    """Mark (or unmark) an event as dismissed (not matching)."""
+TRIAGE_STATUSES = ("new", "shortlisted", "dismissed")
+
+
+def set_triage_status(db: Session, event_id: int, status: str) -> Optional[Event]:
+    """Record the dashboard's triage decision for an event."""
+    if status not in TRIAGE_STATUSES:
+        raise ValueError(f"invalid triage status: {status}")
     event = db.query(Event).filter(Event.id == event_id).first()
     if not event:
         return None
-    event.is_dismissed = dismissed
+    event.triage_status = status
+    event.triaged_at = datetime.datetime.now(datetime.timezone.utc)
+    event.is_dismissed = status == "dismissed"
     db.commit()
     db.refresh(event)
     return event

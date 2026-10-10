@@ -487,14 +487,14 @@ def _process_item(db, item, signal_id, schedule: str):
     # --- Phase 7: Push to Slack (if configured, skip dismissed) ---
     full_event = {**event_data, "id": event_id, **scored} if scored else {**event_data, "id": event_id}
 
-    # is_dismissed lives on the Event row, not in event_data: read it back.
-    dismissed = bool(full_event.get("is_dismissed"))
+    # The triage decision lives on the Event row, not in event_data: read it back.
+    dismissed = full_event.get("triage_status") == "dismissed"
     try:
         event_row = db.query(Event).filter(Event.id == event_id).first()
         if event_row is not None:
-            dismissed = bool(event_row.is_dismissed)
+            dismissed = event_row.triage_status == "dismissed"
     except Exception as e:
-        logger.debug("Could not read is_dismissed for event #%s: %s", event_id, e)
+        logger.debug("Could not read triage_status for event #%s: %s", event_id, e)
 
     if dismissed:
         logger.info("Event #%s is dismissed — skipping Slack push", event_id)

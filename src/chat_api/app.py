@@ -6,11 +6,12 @@ from .schemas import (
     DailySummaryTriggerResponse,
     DashboardInvestigationsResponse,
     DashboardOpportunitiesResponse,
+    DashboardOpportunityDetail,
+    DashboardOpportunityItem,
     DashboardScheduleLogsResponse,
     DashboardSourceHealthResponse,
     DedupResetResponse,
     DeleteOpportunityResponse,
-    DismissEventResponse,
     HealthResponse,
     InvestigateRequest,
     InvestigateResponse,
@@ -20,6 +21,7 @@ from .schemas import (
     SelectTargetsRequest,
     SelectTargetsResponse,
     TavilyUnlockResponse,
+    TriageRequest,
     VerifyRequest,
     VerifyResponse,
 )
@@ -38,24 +40,45 @@ def health() -> HealthResponse:
     dependencies=[Depends(verify_internal_key)],
 )
 def dashboard_opportunities(
+    status: str = Query(default="new", pattern="^(new|shortlisted|dismissed|all)$"),
     event_types: list[str] = Query(default=["grant", "hackathon"]),
     ecosystem: str = "",
-    min_score: float = 0.0,
-    days: int = 0,
-    source_trust: str = "all",
+    source_trust: str = Query(default="all", pattern="^(all|official|discovery)$"),
+    q: str = "",
+    sort: str = Query(default="score", pattern="^(score|deadline|newest)$"),
+    closing_within_days: int = Query(default=0, ge=0, le=365),
 ) -> DashboardOpportunitiesResponse:
     from . import dashboard_service
 
     result = dashboard_service.list_opportunities(
         {
+            "status": status,
             "event_types": event_types,
             "ecosystem": ecosystem,
-            "min_score": min_score,
-            "days": days,
             "source_trust": source_trust,
+            "q": q,
+            "sort": sort,
+            "closing_within_days": closing_within_days,
         }
     )
     return DashboardOpportunitiesResponse(**result)
+
+
+@app.get(
+    "/api/v1/dashboard/opportunities/{event_id}",
+    response_model=DashboardOpportunityDetail,
+    dependencies=[Depends(verify_internal_key)],
+)
+def dashboard_opportunity_detail(event_id: int) -> DashboardOpportunityDetail:
+    from . import dashboard_service
+
+    try:
+        result = dashboard_service.get_opportunity(event_id)
+    except ValueError as exc:
+        if str(exc) == "event_not_found":
+            raise HTTPException(status_code=404, detail="event_not_found") from exc
+        raise
+    return DashboardOpportunityDetail(**result)
 
 
 @app.delete(
@@ -77,24 +100,20 @@ def delete_dashboard_opportunity(event_id: int) -> DeleteOpportunityResponse:
 
 
 @app.put(
-    "/api/v1/dashboard/opportunities/{event_id}/dismiss",
-    response_model=DismissEventResponse,
+    "/api/v1/dashboard/opportunities/{event_id}/triage",
+    response_model=DashboardOpportunityItem,
     dependencies=[Depends(verify_internal_key)],
 )
-def dismiss_dashboard_opportunity(
-    event_id: int,
-    dismissed: bool = Query(default=True, description="Set dismissed=true to mark as not matching, false to restore"),
-) -> DismissEventResponse:
+def triage_dashboard_opportunity(event_id: int, payload: TriageRequest) -> DashboardOpportunityItem:
     from . import dashboard_service
 
     try:
-        result = dashboard_service.dismiss_opportunity(event_id, dismissed=dismissed)
+        result = dashboard_service.triage_opportunity(event_id, payload.status)
     except ValueError as exc:
         if str(exc) == "event_not_found":
             raise HTTPException(status_code=404, detail="event_not_found") from exc
         raise
-
-    return DismissEventResponse(**result)
+    return DashboardOpportunityItem(**result)
 
 
 @app.get(
