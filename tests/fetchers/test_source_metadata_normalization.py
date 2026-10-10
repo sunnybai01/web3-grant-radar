@@ -102,7 +102,7 @@ def test_load_sources_config_applies_default_tavily_success_cooldown(tmp_path: P
     config = load_sources_config(str(path))
     source = config["sources"][0]
 
-    assert source["success_cooldown_minutes"] == 5760
+    assert source["success_cooldown_minutes"] == 660
 
 
 def test_load_sources_config_applies_default_tavily_budget(tmp_path: Path, isolated_defaults) -> None:
@@ -120,4 +120,4 @@ def test_load_sources_config_applies_default_tavily_budget(tmp_path: Path, isola
     config = load_sources_config(str(path))
     source = config["sources"][0]
 
-    assert source["max_sources_per_run"] == 1
+    assert source["max_sources_per_run"] == 14

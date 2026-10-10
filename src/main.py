@@ -1,4 +1,4 @@
-"""Web3 Intelligence Agent — Main Entry Point.
+"""Web3 Grant Radar — Main Entry Point.
 
 Wires together the full V1 pipeline:
   Fetcher → L1 Dedup → L2 Dedup → LLM Classify → Zero-trust Verify → Score → Slack Push
@@ -124,28 +124,59 @@ def _init_slack():
 
 
 def _reconcile_vector_index_once():
-    """Make sure every live Event has a vector, once per process.
+    """Make sure every live Event has a vector.
 
     The vector index is derived state. A wiped or stale Chroma volume used to
     leave pre-existing Events unindexed, so semantic dedup could not match them
     and duplicates were created for opportunities already in the database.
+
+    Normally a single pass per process is enough, but the index can also be
+    cleared from outside the process (POST /api/v1/admin/reset-dedup). The flag
+    therefore only records that we have run once; whenever the collection no
+    longer covers the candidate Events we re-run, which makes the reset
+    self-healing instead of leaving the process matching against an empty index.
     """
     global _index_reconciled
 
-    if _index_reconciled or _deduplicator is None:
+    if _deduplicator is None:
         return
 
     from src.dedup.reconcile import reconcile_vector_index
 
+    if _index_reconciled:
+        try:
+            candidate_ids = _reconcile_candidate_ids()
+            if _deduplicator.vs.existing_ids() >= candidate_ids:
+                return
+            logger.warning(
+                "Vector index lost %d Event(s) — re-indexing before matching",
+                len(candidate_ids - _deduplicator.vs.existing_ids()),
+            )
+        except Exception as e:
+            # Cannot confirm coverage: fall through and reconcile, which is the
+            # safe direction for dedup accuracy.
+            logger.warning("Could not verify vector index coverage: %s", e)
+
     db = SessionLocal()
     try:
-        reconcile_vector_index(db, _deduplicator.vs, deduplicator=_deduplicator)
+        reconcile_vector_index(db, _deduplicator.vs)
     except Exception as e:
         logger.error("Vector index reconciliation failed (dedup will be partial): %s", e)
     finally:
         db.close()
 
     _index_reconciled = True
+
+
+def _reconcile_candidate_ids() -> set[str]:
+    """Doc ids of the Events the reconciler would index."""
+    from src.dedup.reconcile import _candidate_events
+
+    db = SessionLocal()
+    try:
+        return {f"event_{event.id}" for event in _candidate_events(db)}
+    finally:
+        db.close()
 
 
 def _persistable_event_data(event_data: dict) -> dict:
@@ -272,7 +303,7 @@ def _try_extract_dates_from_url(url: str, llm: LLMGateway) -> dict | None:
         from bs4 import BeautifulSoup
 
         resp = httpx.get(url, timeout=DATE_SCRAPE_TIMEOUT, follow_redirects=True,
-                         headers={"User-Agent": "Web3Agent/1.0"})
+                         headers={"User-Agent": "Web3GrantRadar/1.0"})
         resp.raise_for_status()
         soup = BeautifulSoup(resp.text, "lxml")
 
@@ -676,7 +707,7 @@ def run_daily_summary():
 # Entry point
 # ---------------------------------------------------------------------------
 def main():
-    logger.info("Starting Web3 Intelligence Agent V1...")
+    logger.info("Starting Web3 Grant Radar V1...")
 
     # Initialize database tables
     init_db()

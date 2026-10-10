@@ -81,7 +81,7 @@ def _fetch_supporting_page_evidence(event: Event) -> dict[str, Any] | None:
         with httpx.Client(
             timeout=10.0,
             follow_redirects=True,
-            headers={"User-Agent": "Web3-Agent-Investigator/1.0"},
+            headers={"User-Agent": "Web3GrantRadar-Investigator/1.0"},
         ) as client:
             response = client.get(url)
             response.raise_for_status()

@@ -16,9 +16,9 @@ from src.chat_api import dashboard_service
 
 init_db()
 
-st.set_page_config(page_title="Web3 Intelligence Agent", page_icon="🔍", layout="wide")
+st.set_page_config(page_title="Web3 Grant Radar", page_icon="🔍", layout="wide")
 
-st.title("🔍 Web3 Intelligence Agent — Opportunity Dashboard")
+st.title("🔍 Web3 Grant Radar — Opportunity Dashboard")
 st.caption(f"Last updated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
 
 # --- Sidebar filters ---

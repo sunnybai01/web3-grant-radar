@@ -23,7 +23,7 @@ CROSS_REF_CHECKS = {
 
 
 def _github_headers() -> dict:
-    h = {"Accept": "application/vnd.github+json", "User-Agent": "Web3-Agent-Verifier/1.0"}
+    h = {"Accept": "application/vnd.github+json", "User-Agent": "Web3GrantRadar-Verifier/1.0"}
     if GITHUB_TOKEN:
         h["Authorization"] = f"Bearer {GITHUB_TOKEN}"
     return h

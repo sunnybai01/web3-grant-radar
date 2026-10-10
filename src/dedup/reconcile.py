@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from config.settings import settings
 from src.db.models import Event
+from src.dedup.llm_summary import raw_embedding_text
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +43,7 @@ def _candidate_events(db: Session, window_days: Optional[int] = None) -> list[Ev
     )
 
 
-def reconcile_vector_index(db: Session, vector_store, deduplicator=None, window_days: Optional[int] = None) -> dict:
+def reconcile_vector_index(db: Session, vector_store, window_days: Optional[int] = None) -> dict:
     """Index any Event missing from the vector collection.
 
     Returns {"candidates": n, "missing": n, "indexed": n, "failed": n}.
@@ -62,18 +63,15 @@ def reconcile_vector_index(db: Session, vector_store, deduplicator=None, window_
         summary["failed"] = len(events)
         return summary
 
-    if deduplicator is None:
-        from src.dedup.content_dedup import ContentDeduplicator
-
-        deduplicator = ContentDeduplicator(vector_store)
-
     for event in events:
         doc_id = f"event_{event.id}"
         if doc_id in indexed_ids:
             continue
 
         summary["missing"] += 1
-        text = deduplicator.embedding_text_for_event(event)
+        # Deterministic text, no LLM: re-indexing every live Event must not depend
+        # on (or wait for) a summary call per Event.
+        text = raw_embedding_text(event.title or "", event.description or "")
         if not text:
             continue
 

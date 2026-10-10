@@ -20,7 +20,7 @@ class GitHubFetcher(BaseFetcher):
         super().__init__(*args, **kwargs)
         self._headers = {
             "Accept": "application/vnd.github+json",
-            "User-Agent": "Web3-Agent/1.0",
+            "User-Agent": "Web3GrantRadar/1.0",
         }
         github_token = settings.GITHUB_TOKEN
         if github_token:

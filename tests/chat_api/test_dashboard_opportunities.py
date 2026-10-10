@@ -152,3 +152,24 @@ def test_metrics_default_the_coverage_split_when_absent(monkeypatch) -> None:
 
     assert payload.metrics.verified_count == 0
     assert payload.metrics.unchecked_count == 0
+
+
+def test_manual_scan_status_carries_the_error_field(monkeypatch) -> None:
+    """A failed scan must be able to say why; the field was missing from the model."""
+    from src.chat_api import app as chat_app
+    from src.chat_api import manual_scan_service
+
+    monkeypatch.setattr(
+        manual_scan_service,
+        "get_manual_scan_status",
+        lambda: {
+            "job_id": "job-1", "status": "failed", "triggered": True,
+            "started_at": "2026-10-10T05:50:08+00:00", "finished_at": "2026-10-10T05:51:00+00:00",
+            "current_stage": "", "schedules": [], "error": "llm unavailable",
+        },
+    )
+
+    payload = chat_app.manual_scan_status()
+
+    assert payload.status == "failed"
+    assert payload.error == "llm unavailable"

@@ -345,7 +345,7 @@ class SlackDispatcher:
         if not self._configured:
             return False
         text = (
-            f"💓 *Web3 Agent Heartbeat*\n"
+            f"💓 *Web3 Grant Radar Heartbeat*\n"
             f"Today: {stats.get('fetched', 0)} fetched | "
             f"{stats.get('new', 0)} new | "
             f"{stats.get('deduped', 0)} deduped | "

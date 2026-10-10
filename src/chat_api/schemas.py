@@ -259,6 +259,9 @@ class ManualScanStatusResponse(BaseModel):
     finished_at: str = ""
     current_stage: str = ""
     schedules: list[ManualScanScheduleResult] = []
+    # The service reports why a scan failed; without this field the response
+    # model dropped it and the UI could only show a bare "failed".
+    error: str = ""
 
 
 class TavilyUnlockResponse(BaseModel):

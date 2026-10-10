@@ -82,10 +82,18 @@ class Settings:
         self.LLM_TIMEOUT_SECONDS: float = _float("LLM_TIMEOUT_SECONDS", 60.0)
         self.LLM_MAX_RETRIES: int = _int("LLM_MAX_RETRIES", 1)
 
-        # Tavily budget defaults. Code used 20/1440 while the README documented
-        # 1/5760, so all 14 Tavily sources ran on every schedule.
-        self.TAVILY_SUCCESS_COOLDOWN_MINUTES: int = _int("TAVILY_SUCCESS_COOLDOWN_MINUTES", 5760)
-        self.TAVILY_MAX_SOURCES_PER_RUN: int = _int("TAVILY_MAX_SOURCES_PER_RUN", 1)
+        # Tavily budget controls.
+        #
+        # The two knobs together decide the per-source search frequency:
+        #   runs/day x sources fetched per run  ==  searches/day per source
+        # grant_hackathon runs twice a day (09:00 and 21:00), so the cooldown must
+        # be strictly SHORTER than that 12h gap: at exactly 720 minutes the 21:00
+        # run lands on the cooldown boundary and every source is skipped, halving
+        # coverage to once a day. 660 minutes (11h) leaves an hour of margin, and
+        # with the budget covering every enabled source each source is searched
+        # exactly twice per day. Lengthen the cooldown to search less often.
+        self.TAVILY_SUCCESS_COOLDOWN_MINUTES: int = _int("TAVILY_SUCCESS_COOLDOWN_MINUTES", 660)
+        self.TAVILY_MAX_SOURCES_PER_RUN: int = _int("TAVILY_MAX_SOURCES_PER_RUN", 14)
 
         # Slack
         self.SLACK_BOT_TOKEN: str = _str("SLACK_BOT_TOKEN")

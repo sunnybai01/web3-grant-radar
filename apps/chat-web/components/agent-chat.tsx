@@ -838,7 +838,7 @@ export default function AgentChat() {
         <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <Badge className="bg-primary/12 text-primary hover:bg-primary/12 text-xs font-medium">
-              Signal Room
+              Grant Radar
             </Badge>
             <h1 className="text-xl font-semibold tracking-[-0.03em] md:text-2xl">
               Opportunity Pipeline

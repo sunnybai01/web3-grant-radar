@@ -24,7 +24,7 @@ from .schemas import (
     VerifyResponse,
 )
 
-app = FastAPI(title="Web3 Agent Chat API", version="v1")
+app = FastAPI(title="Web3 Grant Radar API", version="v1")
 
 
 @app.get("/api/v1/chat/health", response_model=HealthResponse)
@@ -170,7 +170,11 @@ def trigger_daily_summary() -> DailySummaryTriggerResponse:
     return DailySummaryTriggerResponse(**result)
 
 
-@app.post("/api/v1/chat/select-targets", response_model=SelectTargetsResponse)
+@app.post(
+    "/api/v1/chat/select-targets",
+    response_model=SelectTargetsResponse,
+    dependencies=[Depends(verify_internal_key)],
+)
 def select_targets(payload: SelectTargetsRequest) -> SelectTargetsResponse:
     from . import selection_service
 
