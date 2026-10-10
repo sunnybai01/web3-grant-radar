@@ -349,6 +349,8 @@ def list_source_health() -> dict:
                 "status": source.status or "unknown",
                 "last_success": _format_dt(source.last_success_at, "%Y-%m-%d %H:%M", "Never"),
                 "last_fetch": _format_dt(source.last_fetch_at, "%Y-%m-%d %H:%M", "Never"),
+                "last_success_at": _iso(source.last_success_at),
+                "last_fetch_at": _iso(source.last_fetch_at),
                 "failures": source.consecutive_failures or 0,
                 "last_error": (source.last_error or "")[:100],
             }
@@ -384,6 +386,7 @@ def list_schedule_logs(limit: int = 50) -> dict:
                 "job": log.job_name,
                 "status": log.status or "unknown",
                 "started": _format_dt(log.started_at, "%m-%d %H:%M"),
+                "started_at": _iso(log.started_at),
                 "fetched": log.items_fetched or 0,
                 "new": log.items_new or 0,
                 "deduped": log.items_deduped or 0,

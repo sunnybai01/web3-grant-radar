@@ -201,6 +201,8 @@ class DashboardSourceHealthItem(BaseModel):
     status: str
     last_success: str
     last_fetch: str
+    last_success_at: str | None = None
+    last_fetch_at: str | None = None
     failures: int
     last_error: str
 
@@ -222,6 +224,7 @@ class DashboardScheduleLogItem(BaseModel):
     job: str
     status: str
     started: str
+    started_at: str | None = None
     fetched: int
     new: int
     deduped: int
