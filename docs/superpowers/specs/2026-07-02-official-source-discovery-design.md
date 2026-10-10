@@ -2,7 +2,7 @@
 
 ## 1. Context
 
-The chain whitelist now includes approved ecosystems such as Base, Arbitrum, Polygon, and Avalanche in [config/chains.yaml](/Users/57block/Documents/code/web3-automated-agent/config/chains.yaml). These chains are currently expanded into dynamic DefiLlama-derived discovery sources, but they still lack a strong official source layer in [config/sources.yaml](/Users/57block/Documents/code/web3-automated-agent/config/sources.yaml).
+The chain whitelist now includes approved ecosystems such as Base, Arbitrum, Polygon, and Avalanche in [config/chains.yaml](../../../config/chains.yaml). These chains are currently expanded into dynamic DefiLlama-derived discovery sources, but they still lack a strong official source layer in [config/sources.yaml](../../../config/sources.yaml).
 
 The user preference for the next step is accuracy over coverage. That means the system should add only high-confidence official sources, even if some chains end up with fewer sources than others.
 

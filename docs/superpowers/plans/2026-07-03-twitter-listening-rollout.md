@@ -4,7 +4,7 @@
 
 **Goal:** Replace the disabled RSSHub Twitter path with a Twikit-backed two-lane social ingestion flow that supports official-account direct ingestion, discovery-source preprocessing, and an isolated `social_watch` scheduler.
 
-**Architecture:** Keep the existing fetch-to-event pipeline in [src/main.py](/Users/57block/Documents/code/web3-automated-agent/src/main.py) as the only downstream path for classification, verification, scoring, Slack dispatch, and reporting. Add a Twitter-specific ingestion layer in front of it: direct ingestion for official accounts, preprocessing plus adaptation for discovery accounts and Lists, and a dedicated database-backed cursor state table to avoid destructive changes to existing health tables.
+**Architecture:** Keep the existing fetch-to-event pipeline in [src/main.py](../../../src/main.py) as the only downstream path for classification, verification, scoring, Slack dispatch, and reporting. Add a Twitter-specific ingestion layer in front of it: direct ingestion for official accounts, preprocessing plus adaptation for discovery accounts and Lists, and a dedicated database-backed cursor state table to avoid destructive changes to existing health tables.
 
 **Tech Stack:** Python, Twikit, SQLAlchemy, APScheduler, pytest, existing repository fetcher and pipeline abstractions.
 
@@ -764,7 +764,7 @@ git commit -m "feat: enable twitter social watch rollout"
 
 ## Self-Review Checklist
 
-- Every requirement in [docs/superpowers/specs/2026-07-03-twitter-listening-design.md](/Users/57block/Documents/code/web3-automated-agent/docs/superpowers/specs/2026-07-03-twitter-listening-design.md) is mapped to at least one task.
+- Every requirement in [docs/superpowers/specs/2026-07-03-twitter-listening-design.md](../specs/2026-07-03-twitter-listening-design.md) is mapped to at least one task.
 - No task requires altering existing `source_health` columns in place; new state lands in a dedicated Twitter table to match the repository's no-migration-structure reality.
 - Direct official ingestion, discovery preprocessing, dedicated scheduling, MCP sidecar separation, and Slack throttling are all covered.
 - The final validation includes both unit tests and one runtime social-watch smoke check.

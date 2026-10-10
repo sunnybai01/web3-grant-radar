@@ -138,8 +138,6 @@ Bounty 不在系统范围内：`bounty` 调度不会注册，分类器也会把 
 
 后端接口分布在 `/api/v1/dashboard/*`、`/api/v1/chat/*` 和 `/api/v1/admin/*` 下（见 `src/chat_api/app.py`）。除 `chat/health` 外，其他接口都需要带 `X-Internal-Key` 请求头。前端可以部署到 Vercel，配置同样的 `CHAT_API_*` 变量即可。`chat-api` 应使用只读数据库凭据，并与 pipeline 的凭据分开。
 
-`src/web/app.py` 里还保留着旧版 Streamlit 面板，启动方法见[运维手册](docs/operations.md)。
-
 ## 目录结构
 
 ```
@@ -154,7 +152,6 @@ src/
   db/              SQLAlchemy 模型与查询
   chat_api/        面板与 Copilot 使用的 FastAPI 后端
   agent/           Copilot 调查服务
-  web/             旧版 Streamlit 面板
 apps/chat-web/     Grant Radar Web（Next.js）
 config/            sources.yaml、chains.yaml、keywords.yaml、settings.py
 scripts/           运维与迁移脚本

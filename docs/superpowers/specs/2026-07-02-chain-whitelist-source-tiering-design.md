@@ -2,7 +2,7 @@
 
 ## 1. Context
 
-The current source system is configured as a flat list in [config/sources.yaml](/Users/57block/Documents/code/web3-automated-agent/config/sources.yaml). Official feeds, website scrapers, RSSHub Twitter bridges, GitHub label searches, and Tavily discovery queries all enter the same pipeline at the same level.
+The current source system is configured as a flat list in [config/sources.yaml](../../../config/sources.yaml). Official feeds, website scrapers, RSSHub Twitter bridges, GitHub label searches, and Tavily discovery queries all enter the same pipeline at the same level.
 
 This creates two problems:
 

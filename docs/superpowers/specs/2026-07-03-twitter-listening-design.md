@@ -2,9 +2,9 @@
 
 ## 1. Context
 
-The repository already has a complete post-ingestion opportunity pipeline in [src/main.py](/Users/57block/Documents/code/web3-automated-agent/src/main.py): fetch, URL deduplication, semantic deduplication, classification, verification, scoring, Slack push, and Markdown reporting.
+The repository already has a complete post-ingestion opportunity pipeline in [src/main.py](../../../src/main.py): fetch, URL deduplication, semantic deduplication, classification, verification, scoring, Slack push, and Markdown reporting.
 
-Twitter/X is already represented in the source model, but the current implementation depends on RSSHub in [src/fetchers/twitter_fetcher.py](/Users/57block/Documents/code/web3-automated-agent/src/fetchers/twitter_fetcher.py) and is disabled in [config/sources.yaml](/Users/57block/Documents/code/web3-automated-agent/config/sources.yaml) because the upstream route is no longer stable.
+Twitter/X is already represented in the source model, but the current implementation depends on RSSHub in [src/fetchers/twitter_fetcher.py](../../../src/fetchers/twitter_fetcher.py) and is disabled in [config/sources.yaml](../../../config/sources.yaml) because the upstream route is no longer stable.
 
 The project goal is not broad social listening. The goal is targeted Web3 opportunity discovery: grants, hackathons, builder programs, bounty announcements, and adjacent early discovery signals that are still close enough to structured opportunities to fit the existing pipeline.
 
@@ -199,7 +199,7 @@ This avoids passing under-contextualized tweet text directly into the classifier
 
 ## 8. Scheduler Design
 
-Twitter should run on a dedicated schedule rather than reusing `grant_hackathon` or `bounty` in [src/scheduler/jobs.py](/Users/57block/Documents/code/web3-automated-agent/src/scheduler/jobs.py).
+Twitter should run on a dedicated schedule rather than reusing `grant_hackathon` or `bounty` in [src/scheduler/jobs.py](../../../src/scheduler/jobs.py).
 
 Recommended schedule:
 
@@ -271,7 +271,7 @@ Twitter does not change the core verification model, but it changes how source t
 
 ### 11.1 Official sources
 
-Official Twitter sources should be treated as higher-confidence origins. They may receive the same trust uplift already modeled through `source_tier` and `official` in [src/verifier/verifier.py](/Users/57block/Documents/code/web3-automated-agent/src/verifier/verifier.py).
+Official Twitter sources should be treated as higher-confidence origins. They may receive the same trust uplift already modeled through `source_tier` and `official` in [src/verifier/verifier.py](../../../src/verifier/verifier.py).
 
 However, official origin must not imply that every tweet is itself an opportunity. The content still requires classification and downstream checks.
 

@@ -138,17 +138,7 @@ docker compose exec -T pipeline python scripts/inspect_vector_db.py
 docker compose exec -T postgres psql -U web3agent -d web3agent -c "SELECT source_name,status,consecutive_failures,left(coalesce(last_error,''),120) AS last_error FROM source_health ORDER BY source_name;"
 ```
 
-## 6. 旧版 Streamlit 面板
-
-主面板已经换成 Grant Radar Web（`apps/chat-web`）。如果仍需使用旧版 Streamlit 面板：
-
-```bash
-docker compose exec -d pipeline streamlit run src/web/app.py --server.port 8501 --server.address 0.0.0.0
-```
-
-`docker-compose.yml` 默认没有映射 8501 端口。如果要在宿主机上访问 http://localhost:8501 ，需要先给 `pipeline` 服务加上 `ports: ["127.0.0.1:8501:8501"]`。
-
-## 7. 常见问题排查
+## 6. 常见问题排查
 
 1. **改了配置但没生效**
    - 原因：容器仍在使用旧的环境变量。
@@ -174,7 +164,7 @@ docker compose exec -d pipeline streamlit run src/web/app.py --server.port 8501 
 6. **Slack 收到重复推送**
    - 检查是否还有旧的 `agent-app` 容器在运行（`docker ps`），有的话执行 `docker compose up -d --remove-orphans`。
 
-## 8. 新成员上手建议
+## 7. 新成员上手建议
 
 1. 阅读 `config/sources.yaml`，了解信息源和 schedule
 2. 阅读 `src/main.py`，理解完整处理链路

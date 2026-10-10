@@ -138,8 +138,6 @@ Bounties are out of scope: the `bounty` schedule is not registered, and the clas
 
 The backend routes live under `/api/v1/dashboard/*`, `/api/v1/chat/*` and `/api/v1/admin/*` (see `src/chat_api/app.py`). Every route except `chat/health` requires the `X-Internal-Key` header. The frontend can be deployed to Vercel with the same `CHAT_API_*` variables. Give `chat-api` read-only database credentials and keep them separate from the pipeline's.
 
-A legacy Streamlit dashboard remains in `src/web/app.py`. See the [operations guide](docs/operations.md) for how to run it.
-
 ## Project layout
 
 ```
@@ -154,7 +152,6 @@ src/
   db/              SQLAlchemy models and queries
   chat_api/        FastAPI backend for the dashboard and copilot
   agent/           copilot investigation service
-  web/             legacy Streamlit dashboard
 apps/chat-web/     Grant Radar web (Next.js)
 config/            sources.yaml, chains.yaml, keywords.yaml, settings.py
 scripts/           ops and migration scripts

@@ -143,7 +143,7 @@
 
 ### P1-9 评分只对 4 个维度中的 2 个做钳制，`final_score` 可超出 1–10
 - `src/classifier/scorer.py:174-175` 只 clamp reputation/strategy；roi 与 timeliness 原样写入（`:64-67`）。实测 `{roi:80, timeliness:60}` → `final_score 48.0`；全 0/负值 → `-1.6`。
-- `stars_from_score(48.0)` 返回 5 星，而面板/日报按 `final_score` 排序筛选（`src/web/app.py:51`、`src/chat_api/dashboard_service.py:46`）——脏分数直接改变机会排序。
+- `stars_from_score(48.0)` 返回 5 星，而面板/日报按 `final_score` 排序筛选（`src/chat_api/dashboard_service.py:46`）——脏分数直接改变机会排序。
 - 修复：四个维度在加权前统一 clamp 到 1–10，越界值重新问一次或直接拒收。
 
 ### P1-10 服务端「校验」与用户看到的「已验证」不是一回事
