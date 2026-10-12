@@ -22,6 +22,14 @@ def _patch(monkeypatch, last_success, unhealthy=()):
         heartbeat_module, "get_last_successful_run_at", lambda db, job_name: last_success
     )
     monkeypatch.setattr(heartbeat_module, "_stale_alerted_for", {})
+    monkeypatch.setattr(heartbeat_module, "_down_alerted", set(), raising=False)
+
+
+def _source(name, status="down", failures=3, error="Client error '404 Not Found'"):
+    return type("Source", (), {
+        "source_name": name, "status": status,
+        "consecutive_failures": failures, "last_error": error,
+    })()
 
 
 def test_heartbeat_returns_stats_without_sending_slack(monkeypatch) -> None:
@@ -100,3 +108,54 @@ def test_heartbeat_treats_naive_timestamps_as_utc(monkeypatch) -> None:
     heartbeat_module.heartbeat(sent.append, now=NOW)
 
     assert sent == []
+
+
+# --- dead sources -------------------------------------------------------------
+# ETHGlobal, DoraHacks, Gitcoin and EF ESP sat "down" from 07-01 for three months
+# and nobody was told: the heartbeat never sent anything.
+
+FRESH = NOW - timedelta(hours=1)
+
+
+def test_heartbeat_alerts_when_an_enabled_source_goes_down(monkeypatch) -> None:
+    sent = []
+    _patch(monkeypatch, last_success=FRESH, unhealthy=[_source("optimism_grants", error="401 Unauthorized")])
+
+    heartbeat_module.heartbeat(sent.append, now=NOW, active_sources={"optimism_grants"})
+
+    assert len(sent) == 1
+    assert "optimism_grants" in sent[0]
+    assert "401 Unauthorized" in sent[0]
+
+
+def test_heartbeat_ignores_sources_that_are_disabled(monkeypatch) -> None:
+    sent = []
+    _patch(monkeypatch, last_success=FRESH, unhealthy=[_source("ethglobal")])
+
+    heartbeat_module.heartbeat(sent.append, now=NOW, active_sources={"optimism_rpgf"})
+
+    assert sent == []
+
+
+def test_heartbeat_does_not_alert_on_degraded_sources(monkeypatch) -> None:
+    sent = []
+    _patch(monkeypatch, last_success=FRESH, unhealthy=[_source("feed", status="degraded", failures=1)])
+
+    heartbeat_module.heartbeat(sent.append, now=NOW, active_sources={"feed"})
+
+    assert sent == []
+
+
+def test_heartbeat_alerts_once_per_source_outage(monkeypatch) -> None:
+    sent = []
+    _patch(monkeypatch, last_success=FRESH, unhealthy=[_source("feed")])
+    heartbeat_module.heartbeat(sent.append, now=NOW, active_sources={"feed"})
+    heartbeat_module.heartbeat(sent.append, now=NOW, active_sources={"feed"})
+    assert len(sent) == 1
+
+    monkeypatch.setattr(heartbeat_module, "get_unhealthy_sources", lambda db: [])
+    heartbeat_module.heartbeat(sent.append, now=NOW, active_sources={"feed"})  # recovered
+    monkeypatch.setattr(heartbeat_module, "get_unhealthy_sources", lambda db: [_source("feed")])
+    heartbeat_module.heartbeat(sent.append, now=NOW, active_sources={"feed"})  # down again
+
+    assert len(sent) == 2

@@ -1,7 +1,7 @@
 """System heartbeat and source health monitoring."""
 import logging
 from datetime import datetime, timezone
-from typing import Dict, Optional
+from typing import Dict, Iterable, Optional
 from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
@@ -28,6 +28,10 @@ _daily_stats: Dict[str, int] = {
 # job name -> the last-success timestamp an alert was already sent for, so one
 # outage produces one alert instead of one per heartbeat.
 _stale_alerted_for: Dict[str, Optional[datetime]] = {}
+
+# Sources already reported as down; cleared when a source recovers so its next
+# outage is reported again.
+_down_alerted: set = set()
 
 
 def _as_utc(value: Optional[datetime]) -> Optional[datetime]:
@@ -64,11 +68,43 @@ def _stale_pipeline_alert(db: Session, now: datetime) -> tuple[Optional[float], 
     return hours, message
 
 
-def heartbeat(slack_send_fn, now: Optional[datetime] = None) -> dict:
-    """Run heartbeat: check source health, compile stats, alert on a stale pipeline.
+def _down_sources_alert(unhealthy, active_sources: Optional[Iterable[str]]) -> Optional[str]:
+    """Alert text for enabled sources that went down since the last report.
+
+    Only enabled sources count: disabled ones keep their old "down" rows and would
+    otherwise be reported forever.
+    """
+    if active_sources is None:
+        return None
+    active = set(active_sources)
+    down = {s.source_name: s for s in unhealthy if s.status == "down" and s.source_name in active}
+
+    _down_alerted.intersection_update(down)  # recovered sources may alert again
+    newly_down = [down[name] for name in sorted(down) if name not in _down_alerted]
+    if not newly_down:
+        return None
+    _down_alerted.update(s.source_name for s in newly_down)
+
+    lines = [
+        f"• {s.source_name}: {s.consecutive_failures} consecutive failures, "
+        f"{(s.last_error or 'no error recorded').splitlines()[0][:160]}"
+        for s in newly_down
+    ]
+    return (
+        f"{len(newly_down)} source(s) went down and are no longer being fetched on "
+        "every run (retries back off):\n" + "\n".join(lines)
+    )
+
+
+def heartbeat(
+    slack_send_fn,
+    now: Optional[datetime] = None,
+    active_sources: Optional[Iterable[str]] = None,
+) -> dict:
+    """Run heartbeat: check source health, compile stats, alert on failures.
 
     Routine stats are only returned. Slack hears from the heartbeat only when the
-    main pipeline has stopped succeeding.
+    main pipeline has stopped succeeding, or when an enabled source goes down.
     """
     now = now or datetime.now(timezone.utc)
     db: Session = SessionLocal()
@@ -85,6 +121,11 @@ def heartbeat(slack_send_fn, now: Optional[datetime] = None) -> dict:
         if alert:
             logger.error("Stale pipeline: %s", alert)
             slack_send_fn(alert)
+
+        sources_alert = _down_sources_alert(unhealthy, active_sources)
+        if sources_alert:
+            logger.error("Sources down: %s", sources_alert)
+            slack_send_fn(sources_alert)
 
         return stats
     finally:

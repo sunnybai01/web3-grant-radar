@@ -13,9 +13,12 @@ sources:
   # Grants — Daily (09:00, 21:00)
   # =========================================================================
 
+  # The ESP category feed 404s; the main EF blog feed (probed 2026-10-12) carries
+  # ESP rounds and grant announcements. It holds the whole archive, so only the
+  # newest RSS_MAX_ENTRIES entries are read.
   - name: ethereum_foundation_esp
     type: rss
-    url: https://blog.ethereum.org/category/esp/feed
+    url: https://blog.ethereum.org/en/feed.xml
     schedule: grant_hackathon
     category: grant
     ecosystem: ethereum
@@ -24,7 +27,7 @@ sources:
     source_tier: official
     signal_type: grant
     official: true
-    enabled: false
+    enabled: true
 
   - name: gitcoin_blog
     type: rss
@@ -131,6 +134,8 @@ sources:
     official: true
     enabled: false
 
+  # Retired 2026-10-12: near.org/blog/feed (and every feed URL tried) returns an
+  # HTML page with no entries. NEAR is covered by tavily_near_grants + twitter_near.
   - name: near_foundation
     type: rss
     url: https://near.org/blog/feed
@@ -142,7 +147,7 @@ sources:
     source_tier: official
     signal_type: grant
     official: true
-    enabled: true
+    enabled: false
 
   - name: aptos_foundation
     type: rss
@@ -159,9 +164,10 @@ sources:
     # disabled 2026-08-20: Whole domain sits behind a Vercel bot challenge (429, x-vercel-mitigated). Covered by tavily_aptos_grants + twitter_aptosfoundation.
     enabled: false
 
+  # stellar.org/blog/feed 404s; /blog/rss.xml is the live feed (probed 2026-10-12).
   - name: stellar_community_fund
     type: rss
-    url: https://stellar.org/blog/feed
+    url: https://stellar.org/blog/rss.xml
     schedule: grant_hackathon
     category: grant
     ecosystem: stellar
@@ -170,7 +176,7 @@ sources:
     source_tier: official
     signal_type: grant
     official: true
-    enabled: false
+    enabled: true
 
   - name: stellar_scf_rfp_track
     type: web_scraper
@@ -185,9 +191,11 @@ sources:
     official: true
     enabled: true
 
+  # blog.sui.io/feed redirects to an HTML page; the blog's feed now lives at
+  # www.sui.io/blog/rss.xml (probed 2026-10-12).
   - name: sui_foundation
     type: rss
-    url: https://blog.sui.io/feed
+    url: https://www.sui.io/blog/rss.xml
     schedule: grant_hackathon
     category: grant
     ecosystem: sui
@@ -332,6 +340,7 @@ sources:
     official: true
     enabled: true
 
+  # Retired 2026-10-12: same feed as sui_foundation, so every post was fetched twice.
   - name: sui_overflow
     type: rss
     url: https://blog.sui.io/feed
@@ -343,7 +352,7 @@ sources:
     source_tier: official
     signal_type: hackathon
     official: true
-    enabled: true
+    enabled: false
 
   - name: arbitrum_foundation_blog
     type: web_scraper
@@ -371,6 +380,8 @@ sources:
     official: true
     enabled: true
 
+  # Retired 2026-10-12: atlas.optimism.io answers 401 to unauthenticated requests.
+  # Optimism grants are covered by optimism_rpgf (the governance forum feed).
   - name: optimism_grants
     type: web_scraper
     url: https://atlas.optimism.io
@@ -382,8 +393,9 @@ sources:
     source_tier: official
     signal_type: grant
     official: true
-    enabled: true
+    enabled: false
 
+  # Retired 2026-10-12: same page as starknet_foundation, so it was scraped twice.
   - name: starknet_grants
     type: web_scraper
     url: https://www.starknet.io/grants/
@@ -395,7 +407,7 @@ sources:
     source_tier: official
     signal_type: grant
     official: true
-    enabled: true
+    enabled: false
 
   - name: sonic_innovator_fund
     type: web_scraper

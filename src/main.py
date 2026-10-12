@@ -740,7 +740,7 @@ def run_heartbeat():
         else:
             _slack.send_heartbeat(stats_or_msg)
 
-    heartbeat(_hb_slack)
+    heartbeat(_hb_slack, active_sources=set(_fetcher_registry._fetchers))
 
 
 def run_social_watch():

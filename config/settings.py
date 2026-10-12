@@ -123,6 +123,9 @@ class Settings:
         # Tweets older than this are dropped at fetch time. Official accounts are
         # trusted sources, not fresh ones: a 2023 tweet about "Round 2" is history.
         self.TWITTER_MAX_TWEET_AGE_DAYS: int = _int("TWITTER_MAX_TWEET_AGE_DAYS", 30)
+        # Only the newest entries of a feed are read. Some feeds carry their whole
+        # archive (the EF blog: 642 entries) and would classify years of posts.
+        self.RSS_MAX_ENTRIES: int = _int("RSS_MAX_ENTRIES", 30)
 
         # App
         self.LOG_LEVEL: str = _str("LOG_LEVEL", "INFO")

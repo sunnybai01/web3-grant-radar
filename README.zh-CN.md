@@ -129,7 +129,7 @@ pnpm dev
 | Slack | `SLACK_BOT_TOKEN`、`SLACK_CHANNEL_ID` |
 | 搜索 | `GITHUB_TOKEN`、`TAVILY_API_KEYS`、`TAVILY_SUCCESS_COOLDOWN_MINUTES`、`TAVILY_MAX_SOURCES_PER_RUN` |
 | 安全 API | `GOPLUS_API_KEY`、`CERTIK_API_KEY`、`SCAMSNIFFER_API_KEY` |
-| Twitter | `TWITTER_AUTH_INFO_1`、`TWITTER_AUTH_INFO_2`、`TWITTER_PASSWORD`、`TWITTER_TOTP_SECRET`、`TWITTER_COOKIES_FILE`、`TWITTER_FETCH_COUNT`、`TWITTER_MAX_TWEET_AGE_DAYS`（默认：`30`） |
+| Twitter | `TWITTER_AUTH_INFO_1`、`TWITTER_AUTH_INFO_2`、`TWITTER_PASSWORD`、`TWITTER_TOTP_SECRET`、`TWITTER_COOKIES_FILE`、`TWITTER_FETCH_COUNT`、`TWITTER_MAX_TWEET_AGE_DAYS`（默认：`30`）、`RSS_MAX_ENTRIES`（默认：`30`） |
 | 运行 | `LOG_LEVEL`、`HEARTBEAT_INTERVAL_MINUTES`、`SOCIAL_WATCH_INTERVAL_MINUTES`、`DAILY_SUMMARY_ENABLED`、`DAILY_SUMMARY_CRON`、`SCHEDULER_MISFIRE_GRACE_MINUTES`（默认：`720`）、`PIPELINE_STALE_ALERT_HOURS`（默认：`14`）、`RAW_SIGNAL_MAX_ATTEMPTS`（默认：`3`）、`RAW_SIGNAL_PENDING_TIMEOUT_MINUTES`（默认：`120`） |
 | 过滤 | `MIN_AMOUNT_USD`（默认：`5000`）、`STALE_MAX_AGE_DAYS`（默认：`60`）、`STALE_START_DATE_GRACE_DAYS`（默认：`14`） |
 | Chat API | `CHAT_API_INTERNAL_KEY`：必填，至少 16 位随机字符，并与 `apps/chat-web/.env` 中的值一致；缺失时 `chat-api` 拒绝启动 |
@@ -154,7 +154,7 @@ pnpm dev
 |---|---|
 | `grant_hackathon` | 每天 09:00 和 21:00；每轮搜索所有启用的 Tavily 信息源 |
 | `social_watch` | 每 `SOCIAL_WATCH_INTERVAL_MINUTES` 分钟执行一次（默认：15） |
-| `heartbeat` | 每 `HEARTBEAT_INTERVAL_MINUTES` 分钟执行一次（默认：30），统计运行和信息源健康数据。`grant_hackathon` 连续 `PIPELINE_STALE_ALERT_HOURS` 小时没有成功完成时发一次 Slack 告警（每次中断只发一次） |
+| `heartbeat` | 每 `HEARTBEAT_INTERVAL_MINUTES` 分钟执行一次（默认：30），统计运行和信息源健康数据。`grant_hackathon` 连续 `PIPELINE_STALE_ALERT_HOURS` 小时没有成功完成时，或者某个启用中的信息源变为 `down` 时，发一次 Slack 告警（每次中断只发一次） |
 | `daily_summary` | 按 `DAILY_SUMMARY_CRON` 执行（默认：23:55） |
 | `tavily_unlock` | 每天 00:00 清除 Tavily 信息源的成功冷却 |
 

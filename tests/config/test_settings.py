@@ -62,6 +62,10 @@ def test_failed_signals_are_retried_a_bounded_number_of_times(isolated_defaults)
     assert settings.RAW_SIGNAL_PENDING_TIMEOUT_MINUTES == 120
 
 
+def test_rss_reads_only_the_newest_entries_by_default(isolated_defaults) -> None:
+    assert Settings().RSS_MAX_ENTRIES == 30
+
+
 def test_llm_calls_have_a_finite_timeout_and_retry_budget(isolated_defaults) -> None:
     """An unbounded SDK default let one hung provider stall the item loop."""
     settings = Settings()
