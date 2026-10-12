@@ -132,7 +132,7 @@ Environment variables are read by `config/settings.py`. Recreate the containers 
 | Twitter | `TWITTER_AUTH_INFO_1`, `TWITTER_AUTH_INFO_2`, `TWITTER_PASSWORD`, `TWITTER_TOTP_SECRET`, `TWITTER_COOKIES_FILE`, `TWITTER_FETCH_COUNT`, `TWITTER_MAX_TWEET_AGE_DAYS` (default: `30`) |
 | Runtime | `LOG_LEVEL`, `HEARTBEAT_INTERVAL_MINUTES`, `SOCIAL_WATCH_INTERVAL_MINUTES`, `DAILY_SUMMARY_ENABLED`, `DAILY_SUMMARY_CRON`, `SCHEDULER_MISFIRE_GRACE_MINUTES` (default: `720`), `PIPELINE_STALE_ALERT_HOURS` (default: `14`) |
 | Filtering | `MIN_AMOUNT_USD` (default: `5000`), `STALE_MAX_AGE_DAYS` (default: `60`), `STALE_START_DATE_GRACE_DAYS` (default: `14`) |
-| Chat API | `CHAT_API_INTERNAL_KEY` (must match the frontend setting) |
+| Chat API | `CHAT_API_INTERNAL_KEY`: required, at least 16 random characters, and the same value as in `apps/chat-web/.env`. `chat-api` refuses to start without it |
 
 Frontend variables in `apps/chat-web/.env` include `CHAT_API_BASE_URL` (for example, `http://127.0.0.1:8000`), `CHAT_API_INTERNAL_KEY`, `DEEPSEEK_API_KEY`, `DEEPSEEK_BASE_URL`, and `CHAT_AGENT_MODEL` (default: `deepseek-chat`).
 
@@ -177,7 +177,7 @@ Bounties are out of scope: the `bounty` job is not registered, and the classifie
 - **Detail tabs:** *Overview* (summary, score breakdown, sources), *Verification* (trust score, evidence, similar past events, ways to take part; runs on request), and *Ask Copilot* (a read-only assistant that answers from database tools).
 - **Operations** (`/operations`): manual scan, source health (problems first), recent runs, and maintenance actions — send the daily summary, unlock Tavily sources, reset the dedup index.
 
-Backend routes live under `/api/v1/dashboard/*`, `/api/v1/chat/*`, and `/api/v1/admin/*` (see `src/chat_api/app.py`). Every route except `chat/health` requires the `X-Internal-Key` header. The frontend can be deployed to Vercel with the same `CHAT_API_*` variables. `chat-api` writes triage decisions and deletions, so it needs write access to `events`; keep its credentials separate from the pipeline's.
+Backend routes live under `/api/v1/dashboard/*`, `/api/v1/chat/*`, and `/api/v1/admin/*` (see `src/chat_api/app.py`). Every route except `chat/health` requires the `X-Internal-Key` header. Auth fails closed: `chat-api` refuses to start when `CHAT_API_INTERNAL_KEY` is missing or shorter than 16 characters, and rejects requests if the key is ever unset. The frontend can be deployed to Vercel with the same `CHAT_API_*` variables. `chat-api` writes triage decisions and deletions, so it needs write access to `events`; keep its credentials separate from the pipeline's. `docker-compose.yml` currently gives both services the same `.env`, so they share database credentials until you split them.
 
 ## Project layout
 

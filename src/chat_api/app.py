@@ -1,6 +1,8 @@
+from contextlib import asynccontextmanager
+
 from fastapi import Depends, FastAPI, HTTPException, Query
 
-from .auth import verify_internal_key
+from .auth import require_configured_key, verify_internal_key
 
 from .schemas import (
     DailySummaryTriggerResponse,
@@ -26,7 +28,14 @@ from .schemas import (
     VerifyResponse,
 )
 
-app = FastAPI(title="Web3 Grant Radar API", version="v1")
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    require_configured_key()
+    yield
+
+
+app = FastAPI(title="Web3 Grant Radar API", version="v1", lifespan=lifespan)
 
 
 @app.get("/api/v1/chat/health", response_model=HealthResponse)

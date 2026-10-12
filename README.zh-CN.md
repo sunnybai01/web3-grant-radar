@@ -132,7 +132,7 @@ pnpm dev
 | Twitter | `TWITTER_AUTH_INFO_1`、`TWITTER_AUTH_INFO_2`、`TWITTER_PASSWORD`、`TWITTER_TOTP_SECRET`、`TWITTER_COOKIES_FILE`、`TWITTER_FETCH_COUNT`、`TWITTER_MAX_TWEET_AGE_DAYS`（默认：`30`） |
 | 运行 | `LOG_LEVEL`、`HEARTBEAT_INTERVAL_MINUTES`、`SOCIAL_WATCH_INTERVAL_MINUTES`、`DAILY_SUMMARY_ENABLED`、`DAILY_SUMMARY_CRON`、`SCHEDULER_MISFIRE_GRACE_MINUTES`（默认：`720`）、`PIPELINE_STALE_ALERT_HOURS`（默认：`14`） |
 | 过滤 | `MIN_AMOUNT_USD`（默认：`5000`）、`STALE_MAX_AGE_DAYS`（默认：`60`）、`STALE_START_DATE_GRACE_DAYS`（默认：`14`） |
-| Chat API | `CHAT_API_INTERNAL_KEY`（需要与前端配置一致） |
+| Chat API | `CHAT_API_INTERNAL_KEY`：必填，至少 16 位随机字符，并与 `apps/chat-web/.env` 中的值一致；缺失时 `chat-api` 拒绝启动 |
 
 `apps/chat-web/.env` 中的前端变量包括 `CHAT_API_BASE_URL`（例如 `http://127.0.0.1:8000`）、`CHAT_API_INTERNAL_KEY`、`DEEPSEEK_API_KEY`、`DEEPSEEK_BASE_URL` 和 `CHAT_AGENT_MODEL`（默认：`deepseek-chat`）。
 
@@ -177,7 +177,7 @@ Bounty 不在系统范围内：`bounty` 任务没有注册，分类器也会把 
 - **详情标签页：** *Overview*（简介、分项评分、来源）、*Verification*（可信度评分、证据、相似历史事件、参与方式；点击后才运行）、*Ask Copilot*（只读助手，回答都基于数据库工具）。
 - **运维页**（`/operations`）：手动扫描、信息源健康度（默认只列出有问题的源）、最近运行记录，以及维护操作：立即发送日报、解除 Tavily 锁、重置去重索引。
 
-后端接口位于 `/api/v1/dashboard/*`、`/api/v1/chat/*` 和 `/api/v1/admin/*`（参见 `src/chat_api/app.py`）。除 `chat/health` 外，其余接口都需要 `X-Internal-Key` 请求头。前端可以部署到 Vercel，并配置相同的 `CHAT_API_*` 变量。`chat-api` 会写入处理状态和删除记录，因此需要 `events` 表的写权限；它的凭据应与 pipeline 分开。
+后端接口位于 `/api/v1/dashboard/*`、`/api/v1/chat/*` 和 `/api/v1/admin/*`（参见 `src/chat_api/app.py`）。除 `chat/health` 外，其余接口都需要 `X-Internal-Key` 请求头。鉴权默认拒绝：`CHAT_API_INTERNAL_KEY` 缺失或短于 16 位时 `chat-api` 拒绝启动；运行中 key 被清空，所有请求也会被拒绝。前端可以部署到 Vercel，并配置相同的 `CHAT_API_*` 变量。`chat-api` 会写入处理状态和删除记录，因此需要 `events` 表的写权限；它的凭据应与 pipeline 分开。目前 `docker-compose.yml` 让两个服务读取同一份 `.env`，在拆分之前它们共用同一套数据库凭据。
 
 ## 目录结构
 
