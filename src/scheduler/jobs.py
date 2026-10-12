@@ -20,6 +20,9 @@ DAILY_SUMMARY_SCHEDULE = settings.DAILY_SUMMARY_CRON
 SOCIAL_WATCH_INTERVAL_MINUTES = max(1, int(settings.SOCIAL_WATCH_INTERVAL_MINUTES))
 TAVILY_UNLOCK_SCHEDULE = "0 0 * * *"  # midnight Asia/Shanghai
 
+# The daily summary is dated when it is sent, so it may only run a little late.
+DAILY_SUMMARY_MISFIRE_GRACE_SECONDS = 3600
+
 
 def _heartbeat_trigger():
     """Build a heartbeat trigger that works for any minute interval."""
@@ -33,7 +36,17 @@ def _social_watch_trigger():
 
 
 def create_scheduler() -> BackgroundScheduler:
-    scheduler = BackgroundScheduler(timezone="Asia/Shanghai")
+    # APScheduler's default misfire grace is 1 second: any run that fell inside a
+    # host sleep was dropped, which silently stopped discovery for days. Missed
+    # runs now fire on wake-up, and coalescing turns a backlog into a single run.
+    scheduler = BackgroundScheduler(
+        timezone="Asia/Shanghai",
+        job_defaults={
+            "misfire_grace_time": max(1, int(settings.SCHEDULER_MISFIRE_GRACE_MINUTES)) * 60,
+            "coalesce": True,
+            "max_instances": 1,
+        },
+    )
     return scheduler
 
 
@@ -82,6 +95,7 @@ def register_jobs(scheduler: BackgroundScheduler, pipeline_fn, heartbeat_fn, soc
             id="daily_slack_summary",
             name="Daily Slack Summary",
             replace_existing=True,
+            misfire_grace_time=DAILY_SUMMARY_MISFIRE_GRACE_SECONDS,
         )
 
     # Tavily cooldown unlock — midnight daily

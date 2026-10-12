@@ -129,8 +129,8 @@ pnpm dev
 | Slack | `SLACK_BOT_TOKEN`、`SLACK_CHANNEL_ID` |
 | 搜索 | `GITHUB_TOKEN`、`TAVILY_API_KEYS`、`TAVILY_SUCCESS_COOLDOWN_MINUTES`、`TAVILY_MAX_SOURCES_PER_RUN` |
 | 安全 API | `GOPLUS_API_KEY`、`CERTIK_API_KEY`、`SCAMSNIFFER_API_KEY` |
-| Twitter | `TWITTER_AUTH_INFO_1`、`TWITTER_AUTH_INFO_2`、`TWITTER_PASSWORD`、`TWITTER_TOTP_SECRET`、`TWITTER_COOKIES_FILE`、`TWITTER_FETCH_COUNT` |
-| 运行 | `LOG_LEVEL`、`HEARTBEAT_INTERVAL_MINUTES`、`SOCIAL_WATCH_INTERVAL_MINUTES`、`DAILY_SUMMARY_ENABLED`、`DAILY_SUMMARY_CRON` |
+| Twitter | `TWITTER_AUTH_INFO_1`、`TWITTER_AUTH_INFO_2`、`TWITTER_PASSWORD`、`TWITTER_TOTP_SECRET`、`TWITTER_COOKIES_FILE`、`TWITTER_FETCH_COUNT`、`TWITTER_MAX_TWEET_AGE_DAYS`（默认：`30`） |
+| 运行 | `LOG_LEVEL`、`HEARTBEAT_INTERVAL_MINUTES`、`SOCIAL_WATCH_INTERVAL_MINUTES`、`DAILY_SUMMARY_ENABLED`、`DAILY_SUMMARY_CRON`、`SCHEDULER_MISFIRE_GRACE_MINUTES`（默认：`720`）、`PIPELINE_STALE_ALERT_HOURS`（默认：`14`） |
 | 过滤 | `MIN_AMOUNT_USD`（默认：`5000`）、`STALE_MAX_AGE_DAYS`（默认：`60`）、`STALE_START_DATE_GRACE_DAYS`（默认：`14`） |
 | Chat API | `CHAT_API_INTERNAL_KEY`（需要与前端配置一致） |
 
@@ -144,7 +144,7 @@ pnpm dev
 - `source_tier`：`official` 或 `discovery`；搜索发现类信息源默认为 `discovery`。
 - `signal_type`：`grant`、`hackathon`、`social` 或 `discovery`。
 
-官方信息源在校验阶段会获得信任加权；只要截止日期未过，就不会仅因信息较旧而被丢弃。新增信息源类型时，在 `src/fetchers/` 实现 fetcher，在 `src/fetchers/builder.py` 的 `FETCHER_MAP` 中注册，再在 `sources.yaml` 中添加配置。
+官方信息源在校验阶段会获得信任加权。以下两种情况会被当作过期丢弃：截止日期已过；或者信息源自己标注的发布时间（feed 条目、推文）早于 `STALE_MAX_AGE_DAYS` 天且没有截止日期，除非内容写明是滚动申请。没有日期的官方页面会保留。超过 `TWITTER_MAX_TWEET_AGE_DAYS` 天的推文在抓取阶段直接跳过，每轮都从各账号最新的推文读起。新增信息源类型时，在 `src/fetchers/` 实现 fetcher，在 `src/fetchers/builder.py` 的 `FETCHER_MAP` 中注册，再在 `sources.yaml` 中添加配置。
 
 ## 调度策略（Asia/Shanghai）
 
@@ -154,9 +154,11 @@ pnpm dev
 |---|---|
 | `grant_hackathon` | 每天 09:00 和 21:00；每轮搜索所有启用的 Tavily 信息源 |
 | `social_watch` | 每 `SOCIAL_WATCH_INTERVAL_MINUTES` 分钟执行一次（默认：15） |
-| `heartbeat` | 每 `HEARTBEAT_INTERVAL_MINUTES` 分钟执行一次（默认：30），统计运行和信息源健康数据，不发 Slack 消息 |
+| `heartbeat` | 每 `HEARTBEAT_INTERVAL_MINUTES` 分钟执行一次（默认：30），统计运行和信息源健康数据。`grant_hackathon` 连续 `PIPELINE_STALE_ALERT_HOURS` 小时没有成功完成时发一次 Slack 告警（每次中断只发一次） |
 | `daily_summary` | 按 `DAILY_SUMMARY_CRON` 执行（默认：23:55） |
 | `tavily_unlock` | 每天 00:00 清除 Tavily 信息源的成功冷却 |
+
+主机休眠或繁忙时错过的任务，会在调度器恢复后补跑，最多可以晚 `SCHEDULER_MISFIRE_GRACE_MINUTES` 分钟（日报最多晚 1 小时）；积压的多次错过只补跑一次。
 
 Bounty 不在系统范围内：`bounty` 任务没有注册，分类器也会把 bounty 类信息视为噪音。
 

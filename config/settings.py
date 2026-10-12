@@ -120,18 +120,29 @@ class Settings:
         self.TWITTER_COOKIES_FILE: str = _str("TWITTER_COOKIES_FILE", ".twitter-cookies.json")
         self.SOCIAL_WATCH_INTERVAL_MINUTES: int = _int("SOCIAL_WATCH_INTERVAL_MINUTES", 15)
         self.TWITTER_FETCH_COUNT: int = _int("TWITTER_FETCH_COUNT", 20)
+        # Tweets older than this are dropped at fetch time. Official accounts are
+        # trusted sources, not fresh ones: a 2023 tweet about "Round 2" is history.
+        self.TWITTER_MAX_TWEET_AGE_DAYS: int = _int("TWITTER_MAX_TWEET_AGE_DAYS", 30)
 
         # App
         self.LOG_LEVEL: str = _str("LOG_LEVEL", "INFO")
         self.HEARTBEAT_INTERVAL_MINUTES: int = _int("HEARTBEAT_INTERVAL_MINUTES", 30)
         self.DAILY_SUMMARY_ENABLED: bool = _bool("DAILY_SUMMARY_ENABLED", True)
         self.DAILY_SUMMARY_CRON: str = _str("DAILY_SUMMARY_CRON", "55 23 * * *")
+        # How late a scheduled run may still fire, e.g. after the host wakes from
+        # sleep. 12h covers one full grant_hackathon cycle; with coalescing a
+        # backlog of missed runs fires once.
+        self.SCHEDULER_MISFIRE_GRACE_MINUTES: int = _int("SCHEDULER_MISFIRE_GRACE_MINUTES", 720)
+        # The heartbeat alerts when grant_hackathon has not completed successfully
+        # for this long: its 12h cadence plus a 2h margin for a slow run.
+        self.PIPELINE_STALE_ALERT_HOURS: int = _int("PIPELINE_STALE_ALERT_HOURS", 14)
         self.SLIDING_WINDOW_DAYS: int = 14
         self.SIMILARITY_THRESHOLD: float = 0.75
 
         # Staleness / time-window enforcement
         # Items published more than this many days ago without ANY deadline are
-        # dropped (only applies to discovery sources; official ones are kept).
+        # dropped. Official sources are judged only on the date the source itself
+        # stamped, and are kept when the content says the program is rolling.
         self.STALE_MAX_AGE_DAYS: int = _int("STALE_MAX_AGE_DAYS", 60)
         # Items whose start date passed more than this many days ago, with no
         # deadline, are dropped (discovery sources only).

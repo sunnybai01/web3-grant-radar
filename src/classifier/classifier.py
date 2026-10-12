@@ -1,12 +1,14 @@
 """Classification orchestrator — keyword filter → LLM classify → structured extraction."""
+import email.utils
 import logging
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Optional, Dict, Any, Tuple
 
 from src.fetchers.base import FetchedItem
 from .keyword_filter import KeywordFilter
 from .llm_gateway import LLMGateway
-from .prompts import CLASSIFY_SYSTEM, CLASSIFY_USER_TEMPLATE
+from .prompts import CLASSIFY_SYSTEM, CLASSIFY_USER_TEMPLATE, current_date_label
 
 logger = logging.getLogger(__name__)
 
@@ -14,6 +16,29 @@ logger = logging.getLogger(__name__)
 # out-of-scope BOUNTY) is treated as noise, but only after case normalisation.
 ACCEPTED_CATEGORIES = {"GRANT", "HACKATHON"}
 OUT_OF_SCOPE_CATEGORIES = {"BOUNTY"}
+
+# Metadata keys fetchers use for the content's own publication time.
+PUBLISHED_KEYS = ("created_at", "published_at", "published_date", "published")
+
+
+def published_label(metadata: Optional[Dict[str, Any]]) -> str:
+    """The content's publication date as YYYY-MM-DD, the raw value when it cannot
+    be parsed, or "unknown". Shown to the model so it can tell a 2023 post from news."""
+    for key in PUBLISHED_KEYS:
+        value = (metadata or {}).get(key)
+        if isinstance(value, datetime):
+            return value.date().isoformat()
+        if isinstance(value, str) and value.strip():
+            text = value.strip()
+            try:
+                return datetime.fromisoformat(text.replace("Z", "+00:00")).date().isoformat()
+            except ValueError:
+                pass
+            try:
+                return email.utils.parsedate_to_datetime(text).date().isoformat()
+            except (TypeError, ValueError):
+                return text[:40]
+    return "unknown"
 
 
 @dataclass
@@ -94,6 +119,8 @@ class OpportunityClassifier:
 
         # Stage 2: LLM fine classification + extraction
         user_prompt = CLASSIFY_USER_TEMPLATE.format(
+            today=current_date_label(),
+            published=published_label(item.metadata),
             title=(item.metadata or {}).get("title", "")[:300],
             content=item.raw_content[:3000],
             source_name=item.source_name,

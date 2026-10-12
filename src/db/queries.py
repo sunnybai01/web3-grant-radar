@@ -302,6 +302,15 @@ def finish_schedule_log(db: Session, log_id: int, items_fetched: int = 0,
         db.commit()
 
 
+def get_last_successful_run_at(db: Session, job_name: str) -> Optional[datetime.datetime]:
+    """When ``job_name`` last finished successfully, or None if it never has."""
+    return (
+        db.query(func.max(ScheduleLog.finished_at))
+        .filter(ScheduleLog.job_name == job_name, ScheduleLog.status == "success")
+        .scalar()
+    )
+
+
 # --- PushLog ---
 
 def create_push_log(db: Session, event_id: int, action: str = "create",

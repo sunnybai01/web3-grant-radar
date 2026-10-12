@@ -129,8 +129,8 @@ Environment variables are read by `config/settings.py`. Recreate the containers 
 | Slack | `SLACK_BOT_TOKEN`, `SLACK_CHANNEL_ID` |
 | Search | `GITHUB_TOKEN`, `TAVILY_API_KEYS`, `TAVILY_SUCCESS_COOLDOWN_MINUTES`, `TAVILY_MAX_SOURCES_PER_RUN` |
 | Security APIs | `GOPLUS_API_KEY`, `CERTIK_API_KEY`, `SCAMSNIFFER_API_KEY` |
-| Twitter | `TWITTER_AUTH_INFO_1`, `TWITTER_AUTH_INFO_2`, `TWITTER_PASSWORD`, `TWITTER_TOTP_SECRET`, `TWITTER_COOKIES_FILE`, `TWITTER_FETCH_COUNT` |
-| Runtime | `LOG_LEVEL`, `HEARTBEAT_INTERVAL_MINUTES`, `SOCIAL_WATCH_INTERVAL_MINUTES`, `DAILY_SUMMARY_ENABLED`, `DAILY_SUMMARY_CRON` |
+| Twitter | `TWITTER_AUTH_INFO_1`, `TWITTER_AUTH_INFO_2`, `TWITTER_PASSWORD`, `TWITTER_TOTP_SECRET`, `TWITTER_COOKIES_FILE`, `TWITTER_FETCH_COUNT`, `TWITTER_MAX_TWEET_AGE_DAYS` (default: `30`) |
+| Runtime | `LOG_LEVEL`, `HEARTBEAT_INTERVAL_MINUTES`, `SOCIAL_WATCH_INTERVAL_MINUTES`, `DAILY_SUMMARY_ENABLED`, `DAILY_SUMMARY_CRON`, `SCHEDULER_MISFIRE_GRACE_MINUTES` (default: `720`), `PIPELINE_STALE_ALERT_HOURS` (default: `14`) |
 | Filtering | `MIN_AMOUNT_USD` (default: `5000`), `STALE_MAX_AGE_DAYS` (default: `60`), `STALE_START_DATE_GRACE_DAYS` (default: `14`) |
 | Chat API | `CHAT_API_INTERNAL_KEY` (must match the frontend setting) |
 
@@ -144,7 +144,7 @@ Sources are defined in `config/sources.yaml`. Each entry selects a `fetch_method
 - `source_tier` — `official` or `discovery`. Search-based sources default to `discovery`.
 - `signal_type` — `grant`, `hackathon`, `social`, or `discovery`.
 
-Official sources receive a trust uplift during verification and are not discarded as stale unless their deadline has passed. To add a source type, implement a fetcher under `src/fetchers/`, register it in `FETCHER_MAP` in `src/fetchers/builder.py`, and add entries to `sources.yaml`.
+Official sources receive a trust uplift during verification. They are discarded as stale when their deadline has passed, or when the source dated the item (feed entry, tweet) more than `STALE_MAX_AGE_DAYS` ago with no deadline, unless the content says applications are rolling. Undated official pages are kept. Tweets older than `TWITTER_MAX_TWEET_AGE_DAYS` are skipped at fetch time, and every run reads each account's newest tweets. To add a source type, implement a fetcher under `src/fetchers/`, register it in `FETCHER_MAP` in `src/fetchers/builder.py`, and add entries to `sources.yaml`.
 
 ## Schedule (Asia/Shanghai)
 
@@ -154,9 +154,11 @@ The source of truth is `src/scheduler/jobs.py`. The `schedules:` block in `sourc
 |---|---|
 | `grant_hackathon` | Daily at 09:00 and 21:00; every enabled Tavily source is searched in each run |
 | `social_watch` | Every `SOCIAL_WATCH_INTERVAL_MINUTES` minutes (default: 15) |
-| `heartbeat` | Every `HEARTBEAT_INTERVAL_MINUTES` minutes (default: 30); collects run and source-health stats (no Slack message) |
+| `heartbeat` | Every `HEARTBEAT_INTERVAL_MINUTES` minutes (default: 30); collects run and source-health stats. Sends a Slack alert, once per outage, when `grant_hackathon` has not completed successfully for `PIPELINE_STALE_ALERT_HOURS` hours |
 | `daily_summary` | According to `DAILY_SUMMARY_CRON` (default: 23:55) |
 | `tavily_unlock` | Daily at 00:00; clears the Tavily success cooldowns |
+
+A run missed while the host was asleep or busy still fires when the scheduler wakes up, up to `SCHEDULER_MISFIRE_GRACE_MINUTES` late (the daily summary only up to an hour late), and a backlog of missed runs collapses into a single run.
 
 Bounties are out of scope: the `bounty` job is not registered, and the classifier treats bounty items as noise.
 

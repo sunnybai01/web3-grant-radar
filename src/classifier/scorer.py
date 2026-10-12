@@ -11,7 +11,7 @@ from typing import Dict, Any, Optional
 
 from config.settings import settings
 from .llm_gateway import LLMGateway
-from .prompts import SCORE_SYSTEM, SCORE_USER_TEMPLATE
+from .prompts import SCORE_SYSTEM, SCORE_USER_TEMPLATE, current_date_label
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +37,7 @@ class OpportunityScorer:
         deadline_str = str(deadline) if deadline else "not specified"
 
         prompt = SCORE_USER_TEMPLATE.format(
+            today=current_date_label(),
             category=event_data.get("event_type", ""),
             title=event_data.get("title", ""),
             description=event_data.get("description", "")[:1000],

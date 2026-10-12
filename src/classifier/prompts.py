@@ -1,4 +1,16 @@
 """LLM prompt templates for classification and structured extraction."""
+from datetime import datetime
+from typing import Optional
+from zoneinfo import ZoneInfo
+
+# The team works in Asia/Shanghai; "today" in every prompt is that calendar day.
+PROMPT_TIMEZONE = ZoneInfo("Asia/Shanghai")
+
+
+def current_date_label(now: Optional[datetime] = None) -> str:
+    """Today's date (Asia/Shanghai) as YYYY-MM-DD, for prompts that judge time."""
+    return (now or datetime.now(PROMPT_TIMEZONE)).astimezone(PROMPT_TIMEZONE).date().isoformat()
+
 
 # ---------------------------------------------------------------------------
 # Classification prompt — determine if content is a web3 opportunity
@@ -24,10 +36,18 @@ Judge the stage from what the content actually says, not from the category. Cont
 like "X has approved a grant for <specific project>", "top N finalists announced", or "the round
 has concluded" is "results_announced" even when it is clearly about a grant or hackathon.
 
+Judge time against today's date and the publication date given with the content. A window
+that ended before today is "closed". A dated round, cohort or event announced long before today
+with no sign that it is still running is "closed", not "open". A date written without a year
+refers to its nearest occurrence after the publication date (or after today when the
+publication date is unknown); output it with that year.
+
 For GRANT/HACKATHON, extract all structured fields below. For NOISE, return only the category."""
 
 CLASSIFY_USER_TEMPLATE = """Analyze this content and determine if it describes a Web3 funding opportunity.
 
+Today's date: {today}
+Published: {published}
 Content title: {title}
 Content text:
 {content}
@@ -41,6 +61,8 @@ Return JSON with these fields:
 - description: 2-3 sentence summary (max 500 chars)
 - start_date: ISO 8601 date when applications/registration opens or the program starts, or null if not found
 - deadline: ISO 8601 date or null if not found
+- is_rolling: true only if the content explicitly says applications are accepted on a rolling or
+  ongoing basis with no fixed window; otherwise false
 - amount: the prize/funding amount (e.g. "$50,000", "5 ETH", "Up to $100k") or null
 - track: the focus area (e.g. "DeFi", "Security", "Infrastructure", "ZK", "AI", "Gaming") or null
 - ecosystem: the blockchain ecosystem (e.g. "ethereum", "solana", "sui", "stellar", "polygon") or null
@@ -65,6 +87,7 @@ Dimensions:
 
 SCORE_USER_TEMPLATE = """Score this Web3 opportunity:
 
+Today's date: {today}
 Category: {category}
 Title: {title}
 Description: {description}
@@ -103,6 +126,7 @@ EXTRACTION_SCHEMA = {
         "description": {"type": "string", "maxLength": 500},
         "start_date": {"type": ["string", "null"]},
         "deadline": {"type": ["string", "null"]},
+        "is_rolling": {"type": "boolean"},
         "amount": {"type": ["string", "null"]},
         "track": {"type": ["string", "null"]},
         "ecosystem": {"type": ["string", "null"]},

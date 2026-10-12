@@ -3,6 +3,7 @@
 Wires together the full V1 pipeline:
   Fetcher → L1 Dedup → L2 Dedup → LLM Classify → Zero-trust Verify → Score → Slack Push
 """
+import email.utils
 import logging
 import re
 import sys
@@ -21,6 +22,7 @@ from src.classifier.amount_filter import parse_amount_usd
 from src.classifier.keyword_filter import KeywordFilter
 from src.classifier.llm_gateway import LLMGateway
 from src.classifier.classifier import Classification, OpportunityClassifier
+from src.classifier.prompts import current_date_label
 from src.classifier.scorer import OpportunityScorer
 from src.verifier.verifier import verify_opportunity
 from src.dispatch.slack_client import SlackDispatcher
@@ -196,14 +198,28 @@ def _parse_datetime(value):
         try:
             parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
         except ValueError:
-            return None
+            # Tavily news returns RFC 2822 ("Fri, 09 Oct 2026 08:44:57 GMT"). Read
+            # as ISO only, every Tavily result looked undated and was dropped as
+            # missing_published_at.
+            try:
+                parsed = email.utils.parsedate_to_datetime(value)
+            except (TypeError, ValueError):
+                return None
         return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
     return None
 
 
-def _published_at(item) -> datetime | None:
+# Where the secondary page scrape records the publication date it extracted. Kept
+# apart from the dates fetchers stamp so official sources can ignore a guess.
+SCRAPED_PUBLISHED_KEY = "scraped_published_date"
+
+
+def _published_at(item, include_scraped: bool = True) -> datetime | None:
     metadata = item.metadata or {}
-    for key in ("created_at", "published_at", "published_date", "published"):
+    keys = ("created_at", "published_at", "published_date", "published")
+    if include_scraped:
+        keys += (SCRAPED_PUBLISHED_KEY,)
+    for key in keys:
         published_at = _parse_datetime(metadata.get(key))
         if published_at is not None:
             return published_at
@@ -230,6 +246,14 @@ def _title_years_all_past(title: str | None, now: datetime) -> bool:
     return all(year < now.year for year in years)
 
 
+def _is_rolling(structured: dict) -> bool:
+    """The classifier's is_rolling flag, tolerating a stringly-typed value."""
+    value = structured.get("is_rolling")
+    if isinstance(value, str):
+        return value.strip().lower() in {"true", "yes", "1"}
+    return value is True
+
+
 def _staleness_reason(
     item, structured: dict | None, source_tier: str = "discovery", now: datetime | None = None
 ) -> str | None:
@@ -238,10 +262,11 @@ def _staleness_reason(
     Strategy (relaxed):
     - deadline present AND in the past → definitely expired, drop
     - no deadline AND every year in the title is a past year → drop
+    - published >60 days ago with no deadline → likely stale, drop. Official
+      sources are exempt only when the content says the program is rolling.
     - discovery source whose start date passed >grace ago with no deadline → drop
     - discovery source with no published date AND no deadline → too uncertain, drop
-    - discovery source published >60 days ago with no deadline → likely stale, drop
-    - official source → never dropped for staleness (could be rolling)
+    - official source without a published date → kept (program pages are undated)
 
     A future deadline short-circuits every weaker rule below it: an explicitly stated
     open window outranks any inference drawn from a title or a publication date.
@@ -261,9 +286,20 @@ def _staleness_reason(
     if deadline is None and _title_years_all_past(structured.get("title"), now):
         return "title_year_past"
 
-    # Official sources are always kept (their announcements are assumed rolling
-    # when no explicit deadline is given).
+    # Official sources are trusted, not fresh: a 2023 official tweet about "Round 2"
+    # was pushed as a new opportunity in 2026 when official sources skipped this
+    # rule. Only a program the content itself calls rolling survives its age. The
+    # date must be one the source stamped (feed entry, tweet): official program
+    # pages are undated, and a date scraped off such a page is only a guess.
     if tier == "official":
+        stamped_at = _published_at(item, include_scraped=False)
+        if (
+            deadline is None
+            and stamped_at is not None
+            and now - stamped_at > STALE_EVENT_MAX_AGE
+            and not _is_rolling(structured)
+        ):
+            return "published_too_old"
         return None
 
     published_at = _published_at(item)
@@ -313,11 +349,14 @@ def _try_extract_dates_from_url(url: str, llm: LLMGateway) -> dict | None:
         text = container.get_text(separator="\n", strip=True)[:DATE_SCRAPE_MAX_CHARS]
 
         prompt = (
+            f"Today's date: {current_date_label()}\n"
             "Extract ONLY the dates below from this web page. "
             "Return JSON with no extra text:\n"
             '{"published_date": "ISO 8601 or null", "deadline": "ISO 8601 or null", '
             '"start_date": "ISO 8601 or null"}\n'
-            "start_date is when the program, event, or application window opens.\n\n"
+            "start_date is when the program, event, or application window opens. "
+            "A date written without a year refers to its nearest occurrence after the "
+            "page's publication date (or after today when that is unknown).\n\n"
             f"Page text:\n{text}"
         )
         result = llm.classify_structured(
@@ -406,7 +445,7 @@ def _process_item(db, item, signal_id, schedule: str):
             # _published_at can pick it up.
             pub = extra_dates.get("published_date")
             if pub and not _published_at(item):
-                item.metadata["published_date"] = pub
+                item.metadata[SCRAPED_PUBLISHED_KEY] = pub
 
     staleness_reason = _staleness_reason(item, structured, source_tier=source_tier)
     if staleness_reason:

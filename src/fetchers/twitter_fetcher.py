@@ -1,5 +1,6 @@
 """Twitter/X fetcher via Twikit-backed authenticated timelines."""
 import logging
+from datetime import datetime, timedelta, timezone
 from typing import List
 import hashlib
 
@@ -12,15 +13,15 @@ from .twitter_social import build_tweet_raw_content, preprocess_tweet
 logger = logging.getLogger(__name__)
 
 
-def _load_twitter_state(source_name: str):
-    from src.db.database import SessionLocal
-    from src.db.queries import get_twitter_source_state
-
-    db = SessionLocal()
+def _tweet_id_value(tweet_id) -> int:
     try:
-        return get_twitter_source_state(db, source_name)
-    finally:
-        db.close()
+        return int(tweet_id)
+    except (TypeError, ValueError):
+        return -1
+
+
+def _as_utc(value: datetime) -> datetime:
+    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
 
 
 def _save_twitter_state(source_name: str, **kwargs) -> None:
@@ -40,9 +41,15 @@ class TwitterFetcher(BaseFetcher):
     source_type = "twitter"
 
     def fetch(self) -> List[FetchedItem]:
-        state = _load_twitter_state(self.source_name)
-        cursor = getattr(state, "cursor", None)
+        # Always read the newest page. The timeline's next cursor points to OLDER
+        # tweets; persisting and reusing it walked each account backwards one page
+        # per run, so new tweets were never seen and years-old ones were ingested.
+        # Already-seen tweets are dropped by L1 dedup.
+        cursor = None
         count = int(self.config.get("count") or settings.TWITTER_FETCH_COUNT)
+        min_created_at = datetime.now(timezone.utc) - timedelta(
+            days=max(1, int(settings.TWITTER_MAX_TWEET_AGE_DAYS))
+        )
         source_kind = self.config.get("source_kind", "account")
         client = TwikitTimelineClient(settings)
 
@@ -51,7 +58,7 @@ class TwitterFetcher(BaseFetcher):
                 list_id = self.config.get("list_id", "")
                 if not list_id:
                     raise FetchError(f"Twitter list source '{self.source_name}' has no list_id")
-                rows, next_cursor = client.fetch_list_tweets(
+                rows, _older_page_cursor = client.fetch_list_tweets(
                     list_id=list_id,
                     count=count,
                     cursor=cursor,
@@ -60,7 +67,7 @@ class TwitterFetcher(BaseFetcher):
                 screen_name = self.config.get("screen_name", "")
                 if not screen_name:
                     raise FetchError(f"Twitter source '{self.source_name}' has no screen_name")
-                rows, next_cursor = client.fetch_account_tweets(
+                rows, _older_page_cursor = client.fetch_account_tweets(
                     screen_name=screen_name,
                     count=count,
                     cursor=cursor,
@@ -73,6 +80,21 @@ class TwitterFetcher(BaseFetcher):
         latest_tweet_id = None
         trust_tier = self.config.get("trust_tier") or "official"
         for row in rows:
+            tweet_id = row.get("id", "")
+            # Track the newest id by value: the pinned tweet comes first in the
+            # timeline but is usually older than the rest of the page.
+            if _tweet_id_value(tweet_id) > _tweet_id_value(latest_tweet_id):
+                latest_tweet_id = tweet_id
+
+            created_at = row.get("created_at")
+            if isinstance(created_at, datetime) and _as_utc(created_at) < min_created_at:
+                logger.debug(
+                    "Skip tweet %s from %s: created %s is older than %d days",
+                    tweet_id, self.source_name, created_at.date(),
+                    settings.TWITTER_MAX_TWEET_AGE_DAYS,
+                )
+                continue
+
             row["source_kind"] = source_kind
             decision = preprocess_tweet(row, trust_tier=trust_tier)
             if self.config.get("ingestion_mode") == "preprocessed" and decision["verdict"] == "drop":
@@ -81,8 +103,6 @@ class TwitterFetcher(BaseFetcher):
             raw_url = row.get("url", "")
             raw_content = build_tweet_raw_content(row)
             canonical = self._canonicalize_url(raw_url) if raw_url else ""
-            tweet_id = row.get("id", "")
-            latest_tweet_id = latest_tweet_id or tweet_id
 
             items.append(
                 FetchedItem(
@@ -112,7 +132,7 @@ class TwitterFetcher(BaseFetcher):
         _save_twitter_state(
             self.source_name,
             last_tweet_id=latest_tweet_id,
-            cursor=next_cursor,
+            cursor=None,
         )
 
         return items
