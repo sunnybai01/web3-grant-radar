@@ -9,8 +9,21 @@ import pytest
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
+from src.classifier.classifier import Classification
 from src.fetchers.base import FetchedItem
 from src.main import _parse_datetime, _persistable_event_data, _staleness_reason, run_pipeline
+
+
+@pytest.fixture(autouse=True)
+def signal_outcomes(monkeypatch):
+    """Record mark_raw_signal_processed calls instead of writing to a database."""
+    recorded = []
+    monkeypatch.setattr(
+        "src.main.mark_raw_signal_processed",
+        lambda db, signal_id, error=None: recorded.append((signal_id, error)),
+        raising=False,
+    )
+    return recorded
 
 
 def _iso(days_from_now: int) -> str:
@@ -593,8 +606,9 @@ def test_main_does_not_bootstrap_bounty_pipeline() -> None:
     )
 
 
-def test_run_pipeline_failure_finishes_schedule_log_with_error(monkeypatch) -> None:
-    fake_db = SimpleNamespace(close=lambda: None)
+def test_run_pipeline_failure_finishes_schedule_log_with_error(monkeypatch, signal_outcomes) -> None:
+    rollbacks = []
+    fake_db = SimpleNamespace(close=lambda: None, rollback=lambda: rollbacks.append(True))
     finished = {}
 
     fake_fetcher = SimpleNamespace(config={"fetch_method": "twitter"})
@@ -661,6 +675,9 @@ def test_run_pipeline_failure_finishes_schedule_log_with_error(monkeypatch) -> N
     assert result["new"] == 0
     assert finished["log_id"] == 999
     assert "error" not in finished
+    # The failed item is retried on its next fetch, and the session is usable again.
+    assert signal_outcomes == [(123, "TypeError: 'chain' is an invalid keyword argument for Event")]
+    assert rollbacks == [True]
 
 
 def test_run_pipeline_reports_run_level_failure(monkeypatch) -> None:
@@ -864,3 +881,74 @@ def test_old_tavily_rfc2822_publication_date_still_ages_out() -> None:
 )
 def test_parse_datetime_accepts_iso_and_rfc2822(value, expected) -> None:
     assert _parse_datetime(value) == expected
+
+
+
+def _run_items(monkeypatch, items, classify, process_item_l1=None):
+    """run_pipeline over fixed items with a stub classifier; returns the result."""
+    fake_db = SimpleNamespace(close=lambda: None, rollback=lambda: None)
+
+    class FakeRegistry:
+        _fetchers = {"feed": SimpleNamespace(config={"fetch_method": "rss"})}
+
+        def fetch_all_with_status(self, schedule, should_skip=None):
+            return list(items), {"feed": {"success": True, "error": None, "skipped": None}}
+
+    monkeypatch.setattr("src.main.SessionLocal", lambda: fake_db)
+    monkeypatch.setattr("src.main.create_schedule_log", lambda db, name: SimpleNamespace(id=1))
+    monkeypatch.setattr("src.main.finish_schedule_log", lambda *args, **kwargs: None)
+    monkeypatch.setattr("src.main.upsert_source_health", lambda *args, **kwargs: None)
+    monkeypatch.setattr("src.main.get_source_health", lambda *args, **kwargs: None)
+    monkeypatch.setattr("src.main.process_item_l1", process_item_l1 or (lambda db, item: 7))
+    monkeypatch.setattr("src.main.increment_stat", lambda *args, **kwargs: None)
+    monkeypatch.setattr("src.main._init_components", lambda: None)
+    monkeypatch.setattr("src.main._reconcile_vector_index_once", lambda: None)
+    monkeypatch.setattr("src.main._fetcher_registry", FakeRegistry())
+    monkeypatch.setattr("src.main._classifier", SimpleNamespace(classify=classify, llm=None))
+    monkeypatch.setattr("src.main._slack", SimpleNamespace(is_configured=False))
+    return run_pipeline("grant_hackathon")
+
+
+def _feed_item(content: str = "Grant round open") -> FetchedItem:
+    return FetchedItem(
+        source_type="rss", source_name="feed", raw_content=content,
+        raw_url=f"https://example.org/{abs(hash(content))}",
+        canonical_url=f"https://example.org/{abs(hash(content))}",
+        metadata={"source_tier": "official"},
+    )
+
+
+def test_a_signal_whose_classification_failed_is_marked_for_retry(monkeypatch, signal_outcomes) -> None:
+    """An LLM outage must not make the content "already seen" forever."""
+    result = _run_items(
+        monkeypatch, [_feed_item()], classify=lambda item: Classification(llm_error="timeout")
+    )
+
+    assert result["llm_errors"] == 1
+    assert signal_outcomes == [(7, "classification_failed")]
+
+
+def test_a_judged_signal_is_marked_done(monkeypatch, signal_outcomes) -> None:
+    _run_items(monkeypatch, [_feed_item()], classify=lambda item: Classification(category="NOISE"))
+
+    assert signal_outcomes == [(7, None)]
+
+
+def test_an_l1_write_error_skips_only_that_item(monkeypatch, signal_outcomes) -> None:
+    """A failed raw_signals write used to be counted as a duplicate, or abort the run."""
+    def flaky_l1(db, item):
+        if item.raw_content == "first":
+            raise RuntimeError("could not write raw_signals")
+        return 8
+
+    result = _run_items(
+        monkeypatch,
+        [_feed_item("first"), _feed_item("second")],
+        classify=lambda item: Classification(category="NOISE"),
+        process_item_l1=flaky_l1,
+    )
+
+    assert result["status"] == "success"
+    assert result["item_errors"] == 1
+    assert result["deduped"] == 0
+    assert signal_outcomes == [(8, None)]

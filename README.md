@@ -130,7 +130,7 @@ Environment variables are read by `config/settings.py`. Recreate the containers 
 | Search | `GITHUB_TOKEN`, `TAVILY_API_KEYS`, `TAVILY_SUCCESS_COOLDOWN_MINUTES`, `TAVILY_MAX_SOURCES_PER_RUN` |
 | Security APIs | `GOPLUS_API_KEY`, `CERTIK_API_KEY`, `SCAMSNIFFER_API_KEY` |
 | Twitter | `TWITTER_AUTH_INFO_1`, `TWITTER_AUTH_INFO_2`, `TWITTER_PASSWORD`, `TWITTER_TOTP_SECRET`, `TWITTER_COOKIES_FILE`, `TWITTER_FETCH_COUNT`, `TWITTER_MAX_TWEET_AGE_DAYS` (default: `30`) |
-| Runtime | `LOG_LEVEL`, `HEARTBEAT_INTERVAL_MINUTES`, `SOCIAL_WATCH_INTERVAL_MINUTES`, `DAILY_SUMMARY_ENABLED`, `DAILY_SUMMARY_CRON`, `SCHEDULER_MISFIRE_GRACE_MINUTES` (default: `720`), `PIPELINE_STALE_ALERT_HOURS` (default: `14`) |
+| Runtime | `LOG_LEVEL`, `HEARTBEAT_INTERVAL_MINUTES`, `SOCIAL_WATCH_INTERVAL_MINUTES`, `DAILY_SUMMARY_ENABLED`, `DAILY_SUMMARY_CRON`, `SCHEDULER_MISFIRE_GRACE_MINUTES` (default: `720`), `PIPELINE_STALE_ALERT_HOURS` (default: `14`), `RAW_SIGNAL_MAX_ATTEMPTS` (default: `3`), `RAW_SIGNAL_PENDING_TIMEOUT_MINUTES` (default: `120`) |
 | Filtering | `MIN_AMOUNT_USD` (default: `5000`), `STALE_MAX_AGE_DAYS` (default: `60`), `STALE_START_DATE_GRACE_DAYS` (default: `14`) |
 | Chat API | `CHAT_API_INTERNAL_KEY`: required, at least 16 random characters, and the same value as in `apps/chat-web/.env`. `chat-api` refuses to start without it |
 
@@ -214,4 +214,4 @@ pnpm test
 
 ## Operations
 
-Database backup and restore, migrations (run `scripts/migrate_events_triage_status.py` before upgrading to the triage dashboard), operations scripts, source-health queries, and troubleshooting are covered in the [operations guide](docs/operations.md) (in Chinese).
+Database backup and restore, migrations (run `scripts/migrate_events_triage_status.py` before upgrading to the triage dashboard, and `scripts/migrate_raw_signals_processing_state.py` before upgrading to failed-signal retries), operations scripts, source-health queries, and troubleshooting are covered in the [operations guide](docs/operations.md) (in Chinese).

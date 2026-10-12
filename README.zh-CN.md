@@ -130,7 +130,7 @@ pnpm dev
 | 搜索 | `GITHUB_TOKEN`、`TAVILY_API_KEYS`、`TAVILY_SUCCESS_COOLDOWN_MINUTES`、`TAVILY_MAX_SOURCES_PER_RUN` |
 | 安全 API | `GOPLUS_API_KEY`、`CERTIK_API_KEY`、`SCAMSNIFFER_API_KEY` |
 | Twitter | `TWITTER_AUTH_INFO_1`、`TWITTER_AUTH_INFO_2`、`TWITTER_PASSWORD`、`TWITTER_TOTP_SECRET`、`TWITTER_COOKIES_FILE`、`TWITTER_FETCH_COUNT`、`TWITTER_MAX_TWEET_AGE_DAYS`（默认：`30`） |
-| 运行 | `LOG_LEVEL`、`HEARTBEAT_INTERVAL_MINUTES`、`SOCIAL_WATCH_INTERVAL_MINUTES`、`DAILY_SUMMARY_ENABLED`、`DAILY_SUMMARY_CRON`、`SCHEDULER_MISFIRE_GRACE_MINUTES`（默认：`720`）、`PIPELINE_STALE_ALERT_HOURS`（默认：`14`） |
+| 运行 | `LOG_LEVEL`、`HEARTBEAT_INTERVAL_MINUTES`、`SOCIAL_WATCH_INTERVAL_MINUTES`、`DAILY_SUMMARY_ENABLED`、`DAILY_SUMMARY_CRON`、`SCHEDULER_MISFIRE_GRACE_MINUTES`（默认：`720`）、`PIPELINE_STALE_ALERT_HOURS`（默认：`14`）、`RAW_SIGNAL_MAX_ATTEMPTS`（默认：`3`）、`RAW_SIGNAL_PENDING_TIMEOUT_MINUTES`（默认：`120`） |
 | 过滤 | `MIN_AMOUNT_USD`（默认：`5000`）、`STALE_MAX_AGE_DAYS`（默认：`60`）、`STALE_START_DATE_GRACE_DAYS`（默认：`14`） |
 | Chat API | `CHAT_API_INTERNAL_KEY`：必填，至少 16 位随机字符，并与 `apps/chat-web/.env` 中的值一致；缺失时 `chat-api` 拒绝启动 |
 
@@ -214,4 +214,4 @@ pnpm test
 
 ## 运维
 
-数据库备份和恢复、数据库迁移（升级到机会处理面板前需先执行 `scripts/migrate_events_triage_status.py`）、运维脚本、信息源健康度查询及常见问题排查，请参阅[运维手册](docs/operations.md)。
+数据库备份和恢复、数据库迁移（升级到机会处理面板前需先执行 `scripts/migrate_events_triage_status.py`，升级到失败信号重试前需先执行 `scripts/migrate_raw_signals_processing_state.py`）、运维脚本、信息源健康度查询及常见问题排查，请参阅[运维手册](docs/operations.md)。

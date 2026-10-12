@@ -43,6 +43,7 @@ from src.db.queries import (
     mark_daily_summary_sent,
     mark_daily_summary_failed,
     unlock_tavily_cooldown,
+    mark_raw_signal_processed,
 )
 
 logging.basicConfig(
@@ -390,8 +391,8 @@ def _process_item(db, item, signal_id, schedule: str):
 
     if classification.failed:
         logger.error(
-            "[%s] Classification failed for %s (%s): %s",
-            schedule, item.source_name, classification.llm_error,
+            "[%s] Classification failed for %s signal #%s (%s): %s",
+            schedule, item.source_name, signal_id, classification.llm_error,
             (item.metadata or {}).get("title", "")[:80],
         )
         return None, ["llm_errors"]
@@ -556,6 +557,21 @@ def _process_item(db, item, signal_id, schedule: str):
     return full_event, outcomes
 
 
+def _rollback(db) -> None:
+    try:
+        db.rollback()
+    except Exception:
+        logger.exception("Session rollback failed")
+
+
+def _record_signal_outcome(db, signal_id, error=None) -> None:
+    try:
+        mark_raw_signal_processed(db, signal_id, error=error)
+    except Exception:
+        _rollback(db)
+        logger.exception("Could not record the outcome of raw signal #%s", signal_id)
+
+
 def run_pipeline(schedule: str):
     """Run the full pipeline for one schedule type."""
     global _stats_reset_day
@@ -621,7 +637,15 @@ def run_pipeline(schedule: str):
         # --- Phase 2: L1 URL Dedup ---
         l1_results = []
         for item in items:
-            signal_id = process_item_l1(db, item)
+            try:
+                signal_id = process_item_l1(db, item)
+            except Exception as e:
+                # A failed raw_signals write is not a duplicate, and must not take
+                # the rest of the batch down with it.
+                stats["item_errors"] += 1
+                _rollback(db)
+                logger.exception("[%s] L1 failed for item from %s: %s", schedule, item.source_name, e)
+                continue
             if signal_id:
                 l1_results.append((item, signal_id))
             else:
@@ -642,7 +666,17 @@ def run_pipeline(schedule: str):
                     "[%s] Item from %s failed and was skipped: %s",
                     schedule, item.source_name, e,
                 )
+                # A failed DB statement leaves the session unusable for every
+                # remaining item until it is rolled back.
+                _rollback(db)
+                _record_signal_outcome(db, signal_id, error=f"{type(e).__name__}: {e}")
                 continue
+
+            # Failed signals are retried on their next fetch instead of being
+            # treated as seen; everything else was judged and is done.
+            _record_signal_outcome(
+                db, signal_id, error="classification_failed" if "llm_errors" in outcomes else None
+            )
 
             for outcome in outcomes:
                 stats[outcome] = stats.get(outcome, 0) + 1

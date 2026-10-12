@@ -22,6 +22,14 @@ class RawSignal(Base):
     content_hash = Column(String(64), nullable=True)
     fetched_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
 
+    # Processing state. A signal counts as "seen" by L1 only once processed:
+    # pending -> done | failed. Failed (or abandoned pending) signals are retried
+    # when fetched again, up to RAW_SIGNAL_MAX_ATTEMPTS.
+    status = Column(String(16), nullable=False, default="pending", server_default="pending", index=True)
+    attempts = Column(Integer, nullable=False, default=1, server_default="1")
+    last_error = Column(Text, nullable=True)
+    processed_at = Column(DateTime(timezone=True), nullable=True)
+
     __table_args__ = (
         # Keyed on (url, content_hash), not url alone: many listing/index pages keep a
         # stable URL while their content rolls over, and a url-only key would block

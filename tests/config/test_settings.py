@@ -55,6 +55,13 @@ def test_tweets_older_than_a_month_are_not_ingested_by_default(isolated_defaults
     assert Settings().TWITTER_MAX_TWEET_AGE_DAYS == 30
 
 
+def test_failed_signals_are_retried_a_bounded_number_of_times(isolated_defaults) -> None:
+    settings = Settings()
+
+    assert settings.RAW_SIGNAL_MAX_ATTEMPTS == 3
+    assert settings.RAW_SIGNAL_PENDING_TIMEOUT_MINUTES == 120
+
+
 def test_llm_calls_have_a_finite_timeout_and_retry_budget(isolated_defaults) -> None:
     """An unbounded SDK default let one hung provider stall the item loop."""
     settings = Settings()

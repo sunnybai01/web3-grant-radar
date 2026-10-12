@@ -136,6 +136,11 @@ class Settings:
         # The heartbeat alerts when grant_hackathon has not completed successfully
         # for this long: its 12h cadence plus a 2h margin for a slow run.
         self.PIPELINE_STALE_ALERT_HOURS: int = _int("PIPELINE_STALE_ALERT_HOURS", 14)
+        # A raw signal whose processing failed (LLM outage, crash mid-item) is
+        # retried when it is fetched again, up to this many attempts in total.
+        self.RAW_SIGNAL_MAX_ATTEMPTS: int = _int("RAW_SIGNAL_MAX_ATTEMPTS", 3)
+        # A signal still "pending" after this long was abandoned by a crashed run.
+        self.RAW_SIGNAL_PENDING_TIMEOUT_MINUTES: int = _int("RAW_SIGNAL_PENDING_TIMEOUT_MINUTES", 120)
         self.SLIDING_WINDOW_DAYS: int = 14
         self.SIMILARITY_THRESHOLD: float = 0.75
 
