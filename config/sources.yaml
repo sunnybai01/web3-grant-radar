@@ -354,14 +354,16 @@ sources:
     official: true
     enabled: false
 
+  # The blog's cards are <button onclick> elements with no links; its Ghost feed
+  # (probed 2026-10-12) gives each post its own URL and a publication date.
   - name: arbitrum_foundation_blog
-    type: web_scraper
-    url: https://blog.arbitrum.foundation/
+    type: rss
+    url: https://blog.arbitrum.foundation/rss/
     schedule: grant_hackathon
     category: hackathon
     ecosystem: arbitrum
     chain: arbitrum
-    fetch_method: web_scraper
+    fetch_method: rss
     source_tier: official
     signal_type: hackathon
     official: true

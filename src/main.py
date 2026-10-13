@@ -398,6 +398,15 @@ def _process_item(db, item, signal_id, schedule: str):
         return None, ["llm_errors"]
 
     if not classification.is_opportunity:
+        # data is present only when the LLM itself judged the item (keyword-filter
+        # rejections carry none); counting those keeps precision auditable.
+        if classification.data is not None:
+            logger.info(
+                "[%s] Not an opportunity (%s) from %s: %s",
+                schedule, classification.data.get("noise_reason") or "unspecified",
+                item.source_name, (item.metadata or {}).get("title", "")[:80],
+            )
+            return None, ["noise"]
         return None, []
 
     structured = classification.data or {}
@@ -587,7 +596,7 @@ def run_pipeline(schedule: str):
 
     db = SessionLocal()
     log = create_schedule_log(db, f"pipeline_{schedule}")
-    stats = {"fetched": 0, "new": 0, "deduped": 0, "classified": 0,
+    stats = {"fetched": 0, "new": 0, "deduped": 0, "classified": 0, "noise": 0,
              "unactionable": 0, "low_amount": 0, "stale": 0, "verified": 0,
              "fraud": 0, "pushed": 0, "llm_errors": 0, "item_errors": 0}
     result = None

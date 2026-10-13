@@ -340,8 +340,11 @@ def test_revived_official_feeds_use_working_urls() -> None:
         "ethereum_foundation_esp": "https://blog.ethereum.org/en/feed.xml",
         "stellar_community_fund": "https://stellar.org/blog/rss.xml",
         "sui_foundation": "https://www.sui.io/blog/rss.xml",
+        # The blog's cards are <button onclick> elements; its Ghost feed is cleaner.
+        "arbitrum_foundation_blog": "https://blog.arbitrum.foundation/rss/",
     }
     for name, url in expected.items():
         assert source_map[name]["url"] == url, name
         assert source_map[name]["enabled"] is True, name
     assert source_map["sui_overflow"]["enabled"] is False
+    assert source_map["arbitrum_foundation_blog"]["fetch_method"] == "rss"

@@ -952,3 +952,20 @@ def test_an_l1_write_error_skips_only_that_item(monkeypatch, signal_outcomes) ->
     assert result["item_errors"] == 1
     assert result["deduped"] == 0
     assert signal_outcomes == [(8, None)]
+
+
+def test_llm_judged_noise_is_counted(monkeypatch, signal_outcomes) -> None:
+    """"classified" only counts opportunities; noise needs its own number to audit precision."""
+    result = _run_items(
+        monkeypatch, [_feed_item()],
+        classify=lambda item: Classification(category="NOISE", data={"noise_reason": "roundup"}),
+    )
+
+    assert result["noise"] == 1
+    assert result["classified"] == 0
+
+
+def test_keyword_filter_rejections_are_not_counted_as_llm_noise(monkeypatch, signal_outcomes) -> None:
+    result = _run_items(monkeypatch, [_feed_item()], classify=lambda item: Classification(category="NOISE"))
+
+    assert result["noise"] == 0
