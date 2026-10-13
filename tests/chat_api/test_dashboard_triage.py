@@ -309,3 +309,62 @@ def test_listing_route_defaults_the_coverage_split(client, monkeypatch) -> None:
 
     assert metrics["verified_count"] == 0
     assert metrics["unchecked_count"] == 0
+
+
+
+def test_item_separates_the_apply_link_from_the_source_link() -> None:
+    """51 of 70 "Open apply page" buttons led to a tweet or a news article."""
+    with_apply = _event(1, application_url="https://base.org/apply", source_url="https://x.com/base/status/1")
+    without = _event(2, application_url=None, source_url="https://news.example/base-grants")
+
+    items = {i["id"]: i for i in dashboard_service.build_opportunity_listing([with_apply, without], {}, now=NOW)["items"]}
+
+    assert items[1]["apply_url"] == "https://base.org/apply"
+    assert items[1]["source_url"] == "https://x.com/base/status/1"
+    assert items[2]["apply_url"] == ""
+    assert items[2]["source_url"] == "https://news.example/base-grants"
+
+
+def test_item_says_whether_a_missing_deadline_means_rolling() -> None:
+    rolling = _event(1, deadline=None, is_rolling=True)
+    unknown = _event(2, deadline=None, is_rolling=None)
+
+    items = {i["id"]: i for i in dashboard_service.build_opportunity_listing([rolling, unknown], {}, now=NOW)["items"]}
+
+    assert items[1]["rolling"] is True
+    assert items[2]["rolling"] is False
+
+
+def test_reward_sort_puts_the_largest_known_usd_amount_first() -> None:
+    events = [
+        _event(1, amount="$5,000", amount_usd=5_000.0),
+        _event(2, amount=None, amount_usd=None),
+        _event(3, amount="3.89M OP", amount_usd=3_890_000.0),
+    ]
+
+    listing = dashboard_service.build_opportunity_listing(events, {"sort": "reward"}, now=NOW)
+
+    assert _ids(listing) == [3, 1, 2]
+    assert listing["items"][0]["amount_usd"] == 3_890_000.0
+
+
+def test_a_date_only_deadline_today_is_still_closing_soon() -> None:
+    today = _event(1, deadline=dt.datetime(2026, 10, 10))  # NOW is 2026-10-10 04:00 UTC
+
+    listing = dashboard_service.build_opportunity_listing([today], {}, now=NOW)
+
+    assert listing["metrics"]["closing_soon"] == 1
+
+
+def test_verified_metric_counts_verdicts_not_the_legacy_flag() -> None:
+    """25 degraded Events still carried is_verified=true, so the header read 58%."""
+    events = [
+        _event(1, is_verified=True, verification_log={"verdict": "degraded"}),
+        _event(2, is_verified=True, verification_log={"verdict": "degraded"}),
+        _event(3, is_verified=False, verification_log={"verdict": "verified"}),
+    ]
+
+    metrics = dashboard_service.build_opportunity_listing(events, {}, now=NOW)["metrics"]
+
+    assert metrics["verified_count"] == 1
+    assert metrics["verified_percent"] == 33

@@ -10,7 +10,9 @@ export function makeItem(id: number, overrides: Partial<DashboardOpportunityItem
     summary: "",
     ecosystem: "base",
     amount: "$10,000",
+    amount_usd: 10_000,
     deadline: null,
+    rolling: false,
     first_seen: null,
     heat: 1,
     source_count: 1,
@@ -18,6 +20,7 @@ export function makeItem(id: number, overrides: Partial<DashboardOpportunityItem
     verification_verdict: "unchecked",
     source_trust: "official",
     apply_url: "https://example.com",
+    source_url: "https://example.com/source",
     triage_status: "new",
     ...overrides,
   };

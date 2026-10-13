@@ -296,10 +296,14 @@ def test_expanded_official_website_sources_exist_and_are_enabled() -> None:
         "sui_programs": {"schedule": "grant_hackathon", "chain": "sui", "official": True},
     }
 
-    # Two of these were deliberately retired (their feeds 404 / were removed) and
-    # are replaced by their Tavily + Twitter counterparts. Assert the metadata
-    # contract for all of them and only require `enabled` for the live ones.
-    retired = {"polygon_village", "near_grants"}
+    # Some of these were deliberately retired and are replaced by their Tavily +
+    # Twitter counterparts: polygon_village / near_grants (feeds 404),
+    # near_foundation (its "feed" returns an HTML page; no working feed found),
+    # optimism_grants (atlas.optimism.io answers 401; optimism_rpgf covers the
+    # governance forum) and starknet_grants (same page as starknet_foundation).
+    # Assert the metadata contract for all of them and only require `enabled`
+    # for the live ones.
+    retired = {"polygon_village", "near_grants", "near_foundation", "optimism_grants", "starknet_grants"}
 
     for name, attrs in expected.items():
         assert name in source_map, f"missing official source: {name}"
@@ -312,3 +316,35 @@ def test_expanded_official_website_sources_exist_and_are_enabled() -> None:
         assert src["chain"] == attrs["chain"]
         assert src["official"] is True
         assert src["source_tier"] == "official"
+
+
+
+def test_enabled_sources_do_not_share_a_url() -> None:
+    """sui_foundation/sui_overflow and starknet_foundation/starknet_grants each
+    fetched the same page twice."""
+    config = load_sources_config()
+    seen = {}
+    for src in config["sources"]:
+        url = (src.get("url") or "").rstrip("/").lower()
+        if not url or src.get("enabled", True) is False:
+            continue
+        assert url not in seen, f"{src['name']} and {seen[url]} share {url}"
+        seen[url] = src["name"]
+
+
+def test_revived_official_feeds_use_working_urls() -> None:
+    """Probed 2026-10-12: these return valid feeds with recent entries."""
+    source_map = {s["name"]: s for s in load_sources_config()["sources"]}
+
+    expected = {
+        "ethereum_foundation_esp": "https://blog.ethereum.org/en/feed.xml",
+        "stellar_community_fund": "https://stellar.org/blog/rss.xml",
+        "sui_foundation": "https://www.sui.io/blog/rss.xml",
+        # The blog's cards are <button onclick> elements; its Ghost feed is cleaner.
+        "arbitrum_foundation_blog": "https://blog.arbitrum.foundation/rss/",
+    }
+    for name, url in expected.items():
+        assert source_map[name]["url"] == url, name
+        assert source_map[name]["enabled"] is True, name
+    assert source_map["sui_overflow"]["enabled"] is False
+    assert source_map["arbitrum_foundation_blog"]["fetch_method"] == "rss"

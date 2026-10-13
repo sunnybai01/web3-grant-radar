@@ -13,7 +13,7 @@ export const DEFAULT_FILTERS: OpportunityFilters = {
 };
 
 const TABS: TriageTab[] = ["new", "shortlisted", "dismissed", "all"];
-const SORTS: OpportunitySort[] = ["score", "deadline", "newest"];
+const SORTS: OpportunitySort[] = ["score", "deadline", "newest", "reward"];
 
 function pick<T extends string>(value: string | null, allowed: readonly T[], fallback: T): T {
   return value && (allowed as readonly string[]).includes(value) ? (value as T) : fallback;

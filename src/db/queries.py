@@ -24,35 +24,62 @@ from .models import (
 # --- RawSignal ---
 
 def insert_raw_signal(db: Session, **kwargs) -> Optional[RawSignal]:
+    """Insert a signal on its first processing attempt.
+
+    Returns None only when the (canonical_url, content_hash) pair already exists
+    (a concurrent run won the race). Any other failure is raised: swallowing it
+    used to report a failed write as a successful dedup.
+    """
+    signal = RawSignal(status="pending", attempts=1, **kwargs)
+    db.add(signal)
     try:
-        signal = RawSignal(**kwargs)
-        db.add(signal)
         db.commit()
-        db.refresh(signal)
-        return signal
-    except Exception:
+    except IntegrityError:
         db.rollback()
         return None
+    db.refresh(signal)
+    return signal
+
+
+def find_raw_signal(db: Session, canonical_url: str, content_hash: str) -> Optional[RawSignal]:
+    return (
+        db.query(RawSignal)
+        .filter(RawSignal.canonical_url == canonical_url, RawSignal.content_hash == content_hash)
+        .first()
+    )
+
+
+def claim_raw_signal_retry(db: Session, signal: RawSignal) -> RawSignal:
+    """Start another processing attempt for a failed or abandoned signal."""
+    signal.status = "pending"
+    signal.attempts = (signal.attempts or 1) + 1
+    signal.fetched_at = datetime.datetime.now(datetime.timezone.utc)
+    db.commit()
+    db.refresh(signal)
+    return signal
+
+
+def mark_raw_signal_processed(db: Session, signal_id: int, error: Optional[str] = None) -> None:
+    """Record how processing a signal ended.
+
+    A failure is only retried when no Event uses the signal yet: once an Event
+    was created from it, retrying could mint a duplicate if L2 missed the first.
+    """
+    signal = db.get(RawSignal, signal_id)
+    if signal is None:
+        return
+    linked = error is not None and db.query(
+        db.query(EventSource).filter(EventSource.raw_signal_id == signal_id).exists()
+    ).scalar()
+    signal.status = "failed" if error is not None and not linked else "done"
+    signal.last_error = error[:2000] if error else None
+    signal.processed_at = datetime.datetime.now(datetime.timezone.utc)
+    db.commit()
 
 
 def canonical_url_exists(db: Session, canonical_url: str) -> bool:
     return db.query(
         db.query(RawSignal).filter(RawSignal.canonical_url == canonical_url).exists()
-    ).scalar()
-
-
-def raw_signal_exists(db: Session, canonical_url: str, content_hash: str) -> bool:
-    """L1 dedup lookup: same URL *and* same content already seen.
-
-    A stable URL whose content changed is a new signal, not a duplicate.
-    """
-    return db.query(
-        db.query(RawSignal)
-        .filter(
-            RawSignal.canonical_url == canonical_url,
-            RawSignal.content_hash == content_hash,
-        )
-        .exists()
     ).scalar()
 
 
@@ -136,6 +163,33 @@ def get_events_in_window(
 
 def expire_event(db: Session, event_id: int) -> Optional[Event]:
     return update_event(db, event_id, status="expired")
+
+
+def expire_past_deadline_events(db: Session, now: Optional[datetime.datetime] = None) -> int:
+    """Mark live opportunities whose deadline has passed as expired.
+
+    Shortlisted ones are left alone: the team may still be finishing an
+    application, and the decision is theirs.
+    """
+    from src.deadlines import deadline_passed
+
+    now = now or datetime.datetime.now(datetime.timezone.utc)
+    candidates = (
+        db.query(Event)
+        .filter(
+            Event.status.in_(["new", "pushed"]),
+            Event.triage_status != "shortlisted",
+            Event.deadline.isnot(None),
+            Event.deadline < now,
+        )
+        .all()
+    )
+    expired = [e for e in candidates if deadline_passed(e.deadline, now=now)]
+    for event in expired:
+        event.status = "expired"
+    if expired:
+        db.commit()
+    return len(expired)
 
 
 def mark_event_fraud(db: Session, event_id: int, log: dict) -> Optional[Event]:
@@ -300,6 +354,15 @@ def finish_schedule_log(db: Session, log_id: int, items_fetched: int = 0,
         log.items_verified = items_verified
         log.finished_at = datetime.datetime.now(datetime.timezone.utc)
         db.commit()
+
+
+def get_last_successful_run_at(db: Session, job_name: str) -> Optional[datetime.datetime]:
+    """When ``job_name`` last finished successfully, or None if it never has."""
+    return (
+        db.query(func.max(ScheduleLog.finished_at))
+        .filter(ScheduleLog.job_name == job_name, ScheduleLog.status == "success")
+        .scalar()
+    )
 
 
 # --- PushLog ---
@@ -504,3 +567,4 @@ def truncate_raw_signals(db: Session) -> int:
     db.query(RawSignal).delete()
     db.commit()
     return count
+

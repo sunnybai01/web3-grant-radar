@@ -19,6 +19,9 @@ FETCHER_MAP = {
     "twitter": ".twitter_fetcher:TwitterFetcher",
     "web_scraper": ".web_scraper:WebScraperFetcher",
     "tavily_search": ".tavily_fetcher:TavilyFetcher",
+    "devpost_api": ".devpost_fetcher:DevpostFetcher",
+    "ethglobal_events": ".ethglobal_fetcher:ETHGlobalFetcher",
+    "superteam_grants": ".superteam_fetcher:SuperteamGrantsFetcher",
 }
 
 DISCOVERY_FETCH_METHODS = {"github_search", "tavily_search"}

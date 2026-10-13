@@ -1,13 +1,19 @@
 """L1 URL deduplication — canonical URL matching + PostgreSQL unique constraint."""
+import datetime
 import hashlib
+import logging
 import re
 from typing import Optional
 from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
 from sqlalchemy.orm import Session
 
-from src.db.queries import insert_raw_signal, raw_signal_exists
+from config.settings import settings
+from src.db.models import RawSignal
+from src.db.queries import claim_raw_signal_retry, find_raw_signal, insert_raw_signal
 from src.fetchers.base import FetchedItem
+
+logger = logging.getLogger(__name__)
 
 # Marketing/tracking params to strip. Matched case-insensitively.
 TRACKING_PARAMS = {
@@ -149,12 +155,24 @@ def process_item_l1(db: Session, item: FetchedItem) -> Optional[int]:
 
     Writes to raw_signals table on success. The PostgreSQL UNIQUE constraint on
     (canonical_url, content_hash) provides the final safety net.
+
+    A signal seen before is only a duplicate once it was processed. One whose
+    processing failed, or that a crashed run left pending, is handed out again
+    (same id) until RAW_SIGNAL_MAX_ATTEMPTS is reached.
     """
     canonical = normalize_url(item.canonical_url or item.raw_url, base_url=item.raw_url)
     content_hash = generate_content_hash(normalize_content(item.raw_content))
 
-    if canonical and raw_signal_exists(db, canonical, content_hash):
-        return None
+    existing = find_raw_signal(db, canonical, content_hash) if canonical else None
+    if existing is not None:
+        if not _retryable(existing):
+            return None
+        claim_raw_signal_retry(db, existing)
+        logger.info(
+            "Retrying raw signal #%s from %s (attempt %d): %s",
+            existing.id, item.source_name, existing.attempts, existing.last_error or existing.status,
+        )
+        return existing.id
 
     signal = insert_raw_signal(
         db,
@@ -167,3 +185,17 @@ def process_item_l1(db: Session, item: FetchedItem) -> Optional[int]:
     )
 
     return signal.id if signal else None
+
+
+def _retryable(signal: RawSignal) -> bool:
+    if (signal.attempts or 1) >= settings.RAW_SIGNAL_MAX_ATTEMPTS:
+        return False
+    if signal.status == "failed":
+        return True
+    if signal.status == "pending" and signal.fetched_at is not None:
+        fetched_at = signal.fetched_at
+        if fetched_at.tzinfo is None:
+            fetched_at = fetched_at.replace(tzinfo=datetime.timezone.utc)
+        abandoned_after = datetime.timedelta(minutes=settings.RAW_SIGNAL_PENDING_TIMEOUT_MINUTES)
+        return datetime.datetime.now(datetime.timezone.utc) - fetched_at > abandoned_after
+    return False

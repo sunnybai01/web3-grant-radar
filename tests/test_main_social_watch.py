@@ -5,10 +5,26 @@ from types import SimpleNamespace
 
 import sys
 
+import pytest
+
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
+from src.classifier.classifier import Classification
 from src.fetchers.base import FetchedItem
-from src.main import _persistable_event_data, _staleness_reason, run_pipeline
+from src.main import _parse_datetime, _persistable_event_data, _staleness_reason, run_pipeline
+
+
+@pytest.fixture(autouse=True)
+def signal_outcomes(monkeypatch):
+    """Record mark_raw_signal_processed calls instead of writing to a database."""
+    recorded = []
+    monkeypatch.setattr(
+        "src.main.mark_raw_signal_processed",
+        lambda db, signal_id, error=None: recorded.append((signal_id, error)),
+        raising=False,
+    )
+    monkeypatch.setattr("src.main.expire_past_deadline_events", lambda db, now=None: 0, raising=False)
+    return recorded
 
 
 def _iso(days_from_now: int) -> str:
@@ -286,6 +302,64 @@ def _discovery_item(now: datetime) -> FetchedItem:
     )
 
 
+def _official_tweet(published: datetime) -> FetchedItem:
+    return FetchedItem(
+        source_type="twitter",
+        source_name="twitter_optimism_grants",
+        raw_content="RetroPGF Round 2 nominations are open",
+        raw_url="https://x.com/OptimismGov/status/1615456050391683073",
+        canonical_url="https://x.com/OptimismGov/status/1615456050391683073",
+        metadata={"created_at": published},
+    )
+
+
+def test_staleness_reason_drops_old_official_post_without_deadline() -> None:
+    """#165 'Optimism RetroPGF Round 2 Nomination Window' (tweeted 2023-01-17) was
+    pushed as new on 2026-10-10: official sources skipped every age rule."""
+    now = datetime(2026, 10, 10, tzinfo=timezone.utc)
+
+    assert _staleness_reason(
+        _official_tweet(datetime(2023, 1, 17, tzinfo=timezone.utc)),
+        {"title": "Optimism RetroPGF Round 2 Nomination Window"},
+        source_tier="official",
+        now=now,
+    ) == "published_too_old"
+
+
+@pytest.mark.parametrize("rolling", [True, "true"])
+def test_staleness_reason_keeps_old_official_post_for_a_rolling_program(rolling) -> None:
+    now = datetime(2026, 10, 10, tzinfo=timezone.utc)
+
+    assert _staleness_reason(
+        _official_tweet(datetime(2026, 5, 1, tzinfo=timezone.utc)),
+        {"title": "Ecosystem Grants", "is_rolling": rolling},
+        source_tier="official",
+        now=now,
+    ) is None
+
+
+def test_staleness_reason_keeps_old_official_post_with_a_future_deadline() -> None:
+    now = datetime(2026, 10, 10, tzinfo=timezone.utc)
+
+    assert _staleness_reason(
+        _official_tweet(datetime(2026, 5, 1, tzinfo=timezone.utc)),
+        {"title": "Season 9 Missions", "deadline": "2026-11-30T00:00:00+00:00"},
+        source_tier="official",
+        now=now,
+    ) is None
+
+
+def test_staleness_reason_keeps_recent_official_post_without_deadline() -> None:
+    now = datetime(2026, 10, 10, tzinfo=timezone.utc)
+
+    assert _staleness_reason(
+        _official_tweet(datetime(2026, 10, 1, tzinfo=timezone.utc)),
+        {"title": "Builder Grants"},
+        source_tier="official",
+        now=now,
+    ) is None
+
+
 def test_staleness_reason_drops_title_whose_only_year_is_past() -> None:
     """'ETHIndiaVilla 2025' seen in 2026 is last year's event, even if recently crawled."""
     now = datetime(2026, 8, 4, tzinfo=timezone.utc)
@@ -533,8 +607,9 @@ def test_main_does_not_bootstrap_bounty_pipeline() -> None:
     )
 
 
-def test_run_pipeline_failure_finishes_schedule_log_with_error(monkeypatch) -> None:
-    fake_db = SimpleNamespace(close=lambda: None)
+def test_run_pipeline_failure_finishes_schedule_log_with_error(monkeypatch, signal_outcomes) -> None:
+    rollbacks = []
+    fake_db = SimpleNamespace(close=lambda: None, rollback=lambda: rollbacks.append(True))
     finished = {}
 
     fake_fetcher = SimpleNamespace(config={"fetch_method": "twitter"})
@@ -601,6 +676,9 @@ def test_run_pipeline_failure_finishes_schedule_log_with_error(monkeypatch) -> N
     assert result["new"] == 0
     assert finished["log_id"] == 999
     assert "error" not in finished
+    # The failed item is retried on its next fetch, and the session is usable again.
+    assert signal_outcomes == [(123, "TypeError: 'chain' is an invalid keyword argument for Event")]
+    assert rollbacks == [True]
 
 
 def test_run_pipeline_reports_run_level_failure(monkeypatch) -> None:
@@ -685,3 +763,230 @@ def test_run_daily_summary_resends_even_if_today_already_succeeded(monkeypatch) 
     assert sent["row_id"] == 7
     assert sent["slack_ts"] == "999.888"
     assert sent["payload"]["summary_date"] == result["summary_date"]
+
+def _run_single_undated_item(monkeypatch, source_tier: str, scraped_dates: dict) -> dict:
+    """Run one undated web_scraper item through run_pipeline with a fixed scrape result."""
+    fake_db = SimpleNamespace(close=lambda: None)
+
+    class FakeRegistry:
+        _fetchers = {"solana_grants": SimpleNamespace(config={"fetch_method": "web_scraper"})}
+
+        def fetch_all_with_status(self, schedule, should_skip=None):
+            item = FetchedItem(
+                source_type="web_scraper",
+                source_name="solana_grants",
+                raw_content="Solana Foundation grants program",
+                raw_url="https://solana.org/grants",
+                canonical_url="https://solana.org/grants",
+                metadata={"source_tier": source_tier, "official": source_tier == "official"},
+            )
+            return [item], {"solana_grants": {"success": True, "error": None, "skipped": None}}
+
+    class FakeClassifier:
+        llm = None
+
+        def classify(self, item):
+            return "GRANT", {"title": "Solana Foundation Grants", "description": "Grants for builders"}
+
+    monkeypatch.setattr("src.main.SessionLocal", lambda: fake_db)
+    monkeypatch.setattr("src.main.create_schedule_log", lambda db, name: SimpleNamespace(id=1))
+    monkeypatch.setattr("src.main.finish_schedule_log", lambda *args, **kwargs: None)
+    monkeypatch.setattr("src.main.upsert_source_health", lambda *args, **kwargs: None)
+    monkeypatch.setattr("src.main.get_source_health", lambda *args, **kwargs: None)
+    monkeypatch.setattr("src.main.process_item_l1", lambda db, item: 1)
+    monkeypatch.setattr("src.main.increment_stat", lambda *args, **kwargs: None)
+    monkeypatch.setattr("src.main.verify_opportunity",
+                        lambda **kw: {"verdict": "unchecked", "verification_log": {}})
+    monkeypatch.setattr("src.main.update_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr("src.main._try_extract_dates_from_url", lambda *args, **kwargs: dict(scraped_dates))
+    monkeypatch.setattr("src.main._init_components", lambda: None)
+    monkeypatch.setattr("src.main._reconcile_vector_index_once", lambda: None)
+    monkeypatch.setattr("src.main._fetcher_registry", FakeRegistry())
+    monkeypatch.setattr("src.main._classifier", FakeClassifier())
+    monkeypatch.setattr("src.main._deduplicator",
+                        SimpleNamespace(check_and_process=lambda *args, **kwargs: (1, True)))
+    monkeypatch.setattr("src.main._scorer", SimpleNamespace(score=lambda d: d))
+    monkeypatch.setattr("src.main._slack", SimpleNamespace(is_configured=False, push_new_event=lambda e: None))
+
+    return run_pipeline("grant_hackathon")
+
+
+def test_scraped_page_date_does_not_age_out_an_undated_official_program_page(monkeypatch) -> None:
+    """Official program pages carry no publication date. A date the secondary scrape
+    guessed from the page ("© 2023", an old blog sidebar) must not drop them; only a
+    date the source itself stamped (feed entry, tweet) ages official content out."""
+    result = _run_single_undated_item(
+        monkeypatch, "official", {"published_date": "2023-03-01T00:00:00+00:00"}
+    )
+
+    assert result["stale"] == 0
+    assert result["new"] == 1
+
+
+def test_scraped_page_date_still_ages_out_discovery_items(monkeypatch) -> None:
+    result = _run_single_undated_item(
+        monkeypatch, "discovery", {"published_date": "2023-03-01T00:00:00+00:00"}
+    )
+
+    assert result["stale"] == 1
+    assert result["new"] == 0
+
+
+def _tavily_item(published_date: str) -> FetchedItem:
+    """A Tavily news result; published_date is copied verbatim from the API."""
+    return FetchedItem(
+        source_type="tavily_search",
+        source_name="tavily_starknet_grants",
+        raw_content="Starknet Foundation Seed Grants Program",
+        raw_url="https://example.com/starknet-seed-grants",
+        canonical_url="https://example.com/starknet-seed-grants",
+        metadata={"published_date": published_date, "source_tier": "discovery"},
+    )
+
+
+def test_tavily_rfc2822_publication_date_is_understood() -> None:
+    """Tavily news returns 'Fri, 09 Oct 2026 08:44:57 GMT'. Read as ISO only, every
+    result looked undated, and live programs (Starknet Foundation Grants, Stellar
+    Community Fund) were dropped as missing_published_at on 2026-10-12."""
+    now = datetime(2026, 10, 12, 6, 46, tzinfo=timezone.utc)
+
+    assert _staleness_reason(
+        _tavily_item("Fri, 09 Oct 2026 08:44:57 GMT"),
+        {"title": "Starknet Foundation Seed Grants Program"},
+        source_tier="discovery",
+        now=now,
+    ) is None
+
+
+def test_old_tavily_rfc2822_publication_date_still_ages_out() -> None:
+    now = datetime(2026, 10, 12, 6, 46, tzinfo=timezone.utc)
+
+    assert _staleness_reason(
+        _tavily_item("Mon, 03 Mar 2025 10:00:00 GMT"),
+        {"title": "Starknet Foundation Seed Grants Program"},
+        source_tier="discovery",
+        now=now,
+    ) == "published_too_old"
+
+
+@pytest.mark.parametrize(
+    "value, expected",
+    [
+        ("Fri, 09 Oct 2026 08:44:57 GMT", datetime(2026, 10, 9, 8, 44, 57, tzinfo=timezone.utc)),
+        ("Fri, 09 Oct 2026 16:44:57 +0800", datetime(2026, 10, 9, 8, 44, 57, tzinfo=timezone.utc)),
+        ("Fri, 09 Oct 2026 08:44:57 -0000", datetime(2026, 10, 9, 8, 44, 57, tzinfo=timezone.utc)),
+        ("2026-10-09T08:44:57Z", datetime(2026, 10, 9, 8, 44, 57, tzinfo=timezone.utc)),
+        ("next Friday", None),
+        ("", None),
+    ],
+)
+def test_parse_datetime_accepts_iso_and_rfc2822(value, expected) -> None:
+    assert _parse_datetime(value) == expected
+
+
+
+def _run_items(monkeypatch, items, classify, process_item_l1=None):
+    """run_pipeline over fixed items with a stub classifier; returns the result."""
+    fake_db = SimpleNamespace(close=lambda: None, rollback=lambda: None)
+
+    class FakeRegistry:
+        _fetchers = {"feed": SimpleNamespace(config={"fetch_method": "rss"})}
+
+        def fetch_all_with_status(self, schedule, should_skip=None):
+            return list(items), {"feed": {"success": True, "error": None, "skipped": None}}
+
+    monkeypatch.setattr("src.main.SessionLocal", lambda: fake_db)
+    monkeypatch.setattr("src.main.create_schedule_log", lambda db, name: SimpleNamespace(id=1))
+    monkeypatch.setattr("src.main.finish_schedule_log", lambda *args, **kwargs: None)
+    monkeypatch.setattr("src.main.upsert_source_health", lambda *args, **kwargs: None)
+    monkeypatch.setattr("src.main.get_source_health", lambda *args, **kwargs: None)
+    monkeypatch.setattr("src.main.process_item_l1", process_item_l1 or (lambda db, item: 7))
+    monkeypatch.setattr("src.main.increment_stat", lambda *args, **kwargs: None)
+    monkeypatch.setattr("src.main._init_components", lambda: None)
+    monkeypatch.setattr("src.main._reconcile_vector_index_once", lambda: None)
+    monkeypatch.setattr("src.main._fetcher_registry", FakeRegistry())
+    monkeypatch.setattr("src.main._classifier", SimpleNamespace(classify=classify, llm=None))
+    monkeypatch.setattr("src.main._slack", SimpleNamespace(is_configured=False))
+    return run_pipeline("grant_hackathon")
+
+
+def _feed_item(content: str = "Grant round open") -> FetchedItem:
+    return FetchedItem(
+        source_type="rss", source_name="feed", raw_content=content,
+        raw_url=f"https://example.org/{abs(hash(content))}",
+        canonical_url=f"https://example.org/{abs(hash(content))}",
+        metadata={"source_tier": "official"},
+    )
+
+
+def test_a_signal_whose_classification_failed_is_marked_for_retry(monkeypatch, signal_outcomes) -> None:
+    """An LLM outage must not make the content "already seen" forever."""
+    result = _run_items(
+        monkeypatch, [_feed_item()], classify=lambda item: Classification(llm_error="timeout")
+    )
+
+    assert result["llm_errors"] == 1
+    assert signal_outcomes == [(7, "classification_failed")]
+
+
+def test_a_judged_signal_is_marked_done(monkeypatch, signal_outcomes) -> None:
+    _run_items(monkeypatch, [_feed_item()], classify=lambda item: Classification(category="NOISE"))
+
+    assert signal_outcomes == [(7, None)]
+
+
+def test_an_l1_write_error_skips_only_that_item(monkeypatch, signal_outcomes) -> None:
+    """A failed raw_signals write used to be counted as a duplicate, or abort the run."""
+    def flaky_l1(db, item):
+        if item.raw_content == "first":
+            raise RuntimeError("could not write raw_signals")
+        return 8
+
+    result = _run_items(
+        monkeypatch,
+        [_feed_item("first"), _feed_item("second")],
+        classify=lambda item: Classification(category="NOISE"),
+        process_item_l1=flaky_l1,
+    )
+
+    assert result["status"] == "success"
+    assert result["item_errors"] == 1
+    assert result["deduped"] == 0
+    assert signal_outcomes == [(8, None)]
+
+
+def test_llm_judged_noise_is_counted(monkeypatch, signal_outcomes) -> None:
+    """"classified" only counts opportunities; noise needs its own number to audit precision."""
+    result = _run_items(
+        monkeypatch, [_feed_item()],
+        classify=lambda item: Classification(category="NOISE", data={"noise_reason": "roundup"}),
+    )
+
+    assert result["noise"] == 1
+    assert result["classified"] == 0
+
+
+def test_keyword_filter_rejections_are_not_counted_as_llm_noise(monkeypatch, signal_outcomes) -> None:
+    result = _run_items(monkeypatch, [_feed_item()], classify=lambda item: Classification(category="NOISE"))
+
+    assert result["noise"] == 0
+
+
+def test_each_run_expires_opportunities_past_their_deadline(monkeypatch, signal_outcomes) -> None:
+    expired = []
+    monkeypatch.setattr("src.main.expire_past_deadline_events", lambda db, now=None: expired.append(db) or 3)
+
+    result = _run_items(monkeypatch, [_feed_item()], classify=lambda item: Classification(category="NOISE"))
+
+    assert len(expired) == 1
+    assert result["expired"] == 3
+
+
+def test_a_date_only_deadline_is_not_stale_on_its_own_day() -> None:
+    """'2026-10-25' was dropped as deadline_expired from 08:00 Beijing time that day."""
+    now = datetime(2026, 10, 25, 3, 0, tzinfo=timezone.utc)
+
+    assert _staleness_reason(
+        _discovery_item(now), {"title": "Hackathon", "deadline": "2026-10-25"},
+        source_tier="discovery", now=now,
+    ) is None

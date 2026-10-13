@@ -192,3 +192,58 @@ def test_summary_table_truncates_beyond_the_row_limit() -> None:
     assert table.count("\n") == SUMMARY_TABLE_ROW_LIMIT + 4  # header + rule + rows + notice
     assert "… 4 more not shown" in table
     assert links == []  # no urls supplied
+
+
+def test_push_new_event_tolerates_a_missing_ecosystem_and_track() -> None:
+    """A Devpost hackathon with no ecosystem crashed the card build (#181 never pushed)."""
+    sent = {}
+
+    class FakeClient:
+        def chat_postMessage(self, **kwargs):
+            sent.update(kwargs)
+            return {"ts": "1.2"}
+
+    dispatcher = SlackDispatcher.__new__(SlackDispatcher)
+    dispatcher._configured = True
+    dispatcher.client = FakeClient()
+    dispatcher.channel_id = "C123"
+
+    ts = dispatcher.push_new_event({
+        "id": 181, "event_type": "hackathon", "title": "SUSTAIN-A-THON 2.0",
+        "amount": "$150,000", "deadline": "2026-10-28", "ecosystem": None, "track": None,
+        "final_score": 4.95, "source_url": "https://sustain-a-thon.devpost.com/",
+        "source_type": "devpost_api",
+    })
+
+    assert ts == "1.2"
+    fields = " ".join(f["text"] for f in sent["blocks"][1]["fields"])
+    assert "None" not in fields
+
+
+def _card_fields(event: dict) -> str:
+    sent = {}
+
+    class FakeClient:
+        def chat_postMessage(self, **kwargs):
+            sent.update(kwargs)
+            return {"ts": "1.2"}
+
+    dispatcher = SlackDispatcher.__new__(SlackDispatcher)
+    dispatcher._configured = True
+    dispatcher.client = FakeClient()
+    dispatcher.channel_id = "C123"
+    dispatcher.push_new_event({"id": 1, "event_type": "grant", "title": "T", "final_score": 6.0,
+                               "source_url": "https://x.com/a/status/1", **event})
+    return " ".join(f["text"] for f in sent["blocks"][1]["fields"])
+
+
+def test_card_says_rolling_only_when_the_program_is_rolling() -> None:
+    """"Rolling / Not specified" covered 61 of 70 Events, nearly all simply undated."""
+    assert "*Deadline:* Rolling" in _card_fields({"deadline": None, "is_rolling": True})
+    assert "*Deadline:* Not stated" in _card_fields({"deadline": None, "is_rolling": None})
+
+
+def test_card_shows_a_usd_estimate_for_token_amounts() -> None:
+    assert "3.89M OP (≈ $3.9M)" in _card_fields({"amount": "3.89M OP", "amount_usd": 3_890_000.0})
+    assert "≈" not in _card_fields({"amount": "$50,000", "amount_usd": 50_000.0})
+    assert "$30,000 + 4,000 APT (≈ $62K)" in _card_fields({"amount": "$30,000 + 4,000 APT", "amount_usd": 62_000.0})

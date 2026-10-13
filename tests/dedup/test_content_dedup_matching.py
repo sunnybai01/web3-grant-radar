@@ -42,10 +42,6 @@ class FakeVectorStore:
         self.added.append((doc_id, text, metadata))
 
 
-class NullSummary:
-    def get_embedding_text(self, title, description):
-        return f"{title} {description}".strip()
-
 
 def _db_session():
     engine = create_engine("sqlite:///:memory:")
@@ -64,7 +60,7 @@ def _event(db, **kwargs) -> Event:
 
 
 def _dedup(store) -> ContentDeduplicator:
-    return ContentDeduplicator(store, llm_extractor=NullSummary())
+    return ContentDeduplicator(store)
 
 
 def test_normalize_title_ignores_case_punctuation_and_emoji() -> None:

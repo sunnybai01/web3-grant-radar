@@ -1,6 +1,8 @@
+from contextlib import asynccontextmanager
+
 from fastapi import Depends, FastAPI, HTTPException, Query
 
-from .auth import verify_internal_key
+from .auth import require_configured_key, verify_internal_key
 
 from .schemas import (
     DailySummaryTriggerResponse,
@@ -26,7 +28,14 @@ from .schemas import (
     VerifyResponse,
 )
 
-app = FastAPI(title="Web3 Grant Radar API", version="v1")
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    require_configured_key()
+    yield
+
+
+app = FastAPI(title="Web3 Grant Radar API", version="v1", lifespan=lifespan)
 
 
 @app.get("/api/v1/chat/health", response_model=HealthResponse)
@@ -45,7 +54,7 @@ def dashboard_opportunities(
     ecosystem: str = "",
     source_trust: str = Query(default="all", pattern="^(all|official|discovery)$"),
     q: str = "",
-    sort: str = Query(default="score", pattern="^(score|deadline|newest)$"),
+    sort: str = Query(default="score", pattern="^(score|deadline|newest|reward)$"),
     closing_within_days: int = Query(default=0, ge=0, le=365),
 ) -> DashboardOpportunitiesResponse:
     from . import dashboard_service

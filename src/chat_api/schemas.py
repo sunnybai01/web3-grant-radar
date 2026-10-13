@@ -131,8 +131,11 @@ class DashboardOpportunityItem(BaseModel):
     summary: str = ""
     ecosystem: str | None = None
     amount: str | None = None
-    # ISO-8601 or null for rolling programmes; the UI renders relative time.
+    amount_usd: float | None = None
+    # ISO-8601, or null when no deadline was stated; `rolling` says whether that is
+    # because applications are accepted on a rolling basis.
     deadline: str | None = None
+    rolling: bool = False
     first_seen: str | None = None
     heat: int
     source_count: int = 0
@@ -140,6 +143,7 @@ class DashboardOpportunityItem(BaseModel):
     verification_verdict: str
     source_trust: str
     apply_url: str
+    source_url: str = ""
     triage_status: TriageStatus = "new"
 
 

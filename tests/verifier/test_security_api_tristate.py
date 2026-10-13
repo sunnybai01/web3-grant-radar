@@ -7,6 +7,8 @@ unreachable, and every event was stored as verified.
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from src.verifier import security_api
@@ -31,17 +33,70 @@ def _forbid_network(monkeypatch):
     monkeypatch.setattr(security_api.httpx, "Client", explode)
 
 
-def test_no_keys_yields_unknown_not_clean(monkeypatch) -> None:
+@pytest.fixture(autouse=True)
+def _no_real_provider_calls(monkeypatch):
+    """GoPlus needs no key, so an unstubbed test would call the real API."""
+    _forbid_network(monkeypatch)
+
+
+def test_no_answer_yields_unknown_not_clean(monkeypatch) -> None:
     _blank_keys(monkeypatch)
     _forbid_network(monkeypatch)
 
     outcome = security_api_check("https://free-eth-airdrop-claim.xyz/apply")
 
     assert outcome["result"] == RESULT_UNKNOWN
-    assert outcome["configured"] is False
     assert outcome["reason"] == "no_security_provider_answered"
     # `passed` still means "not malicious", but it must never be read as verified.
     assert outcome["passed"] is True
+
+
+class _GoPlusClient:
+    """Stands in for httpx.Client; records the request and answers like GoPlus."""
+
+    calls = []
+
+    def __init__(self, phishing_site=0, **kwargs):
+        self.phishing_site = phishing_site
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def get(self, url, params=None, headers=None):
+        _GoPlusClient.calls.append((url, params, headers or {}))
+        import httpx
+        return httpx.Response(200, json={"code": 1, "message": "OK",
+                                         "result": {"website_contract_security": [], "phishing_site": self.phishing_site}})
+
+
+def test_goplus_answers_without_a_key_at_its_phishing_site_endpoint(monkeypatch) -> None:
+    """The code called /api/v1/phishing/site (404) and only with a key; the documented
+    /api/v1/phishing_site endpoint answers without one, so no event was ever checked."""
+    _blank_keys(monkeypatch)
+    _GoPlusClient.calls = []
+    monkeypatch.setattr(security_api.httpx, "Client", lambda **kw: _GoPlusClient(phishing_site=0))
+
+    outcome = security_api_check("https://ethglobal.com/events/mumbai")
+
+    url, params, headers = _GoPlusClient.calls[0]
+    assert url == "https://api.gopluslabs.io/api/v1/phishing_site"
+    assert params == {"url": "ethglobal.com"}
+    assert "Authorization" not in headers
+    assert outcome["result"] == RESULT_CLEAN
+    assert outcome["reason"] == "clean_by:goplus"
+
+
+def test_goplus_flags_a_phishing_site(monkeypatch) -> None:
+    _blank_keys(monkeypatch)
+    monkeypatch.setattr(security_api.httpx, "Client", lambda **kw: _GoPlusClient(phishing_site=1))
+
+    outcome = security_api_check("https://free-eth-airdrop-claim.xyz/apply")
+
+    assert outcome["result"] == RESULT_MALICIOUS
+    assert outcome["passed"] is False
 
 
 def test_malicious_provider_blocks(monkeypatch) -> None:

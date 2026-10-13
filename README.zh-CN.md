@@ -28,11 +28,11 @@ Web3 Grant Radar 持续监控各生态公告源、项目官网、Tavily 搜索�
 
 ## 功能特性
 
-- **多源发现**：支持 RSS、网页抓取、Tavily 搜索和 X/Twitter（Twikit），统一在 `config/sources.yaml` 中配置。代码里也提供 GitHub Issue 搜索抓取器，但默认没有配置 GitHub 信息源。
+- **多源发现**：支持 RSS、网页抓取、Tavily 搜索、X/Twitter（Twikit），以及平台结构化列表（ETHGlobal 活动、Superteam Earn 资助、Devpost 黑客松），统一在 `config/sources.yaml` 中配置。代码里也提供 GitHub Issue 搜索抓取器，但默认没有配置 GitHub 信息源。
 - **双层去重**：L1 根据规范化 URL 去重；L2 使用 ChromaDB 向量语义去重，并结合截止日期、生态信息进行否决判断。
 - **LLM 辅助分类**：先进行关键词粗筛，再调用 DeepSeek / Qwen / Gemini 分类，并按优先级降级。
 - **质量门控**：过滤不可执行、低于最低奖励金额或信息过期的机会。
-- **零信任校验**：来源锚定、GitHub 与域名交叉验证，并接入 GoPlus / CertiK / ScamSniffer 安全 API；判定为欺诈的项目会终止处理。
+- **零信任校验**：来源锚定、申请页/来源页的可访问性交叉核对，以及安全 API：GoPlus 钓鱼网站检测（无需 key），配置了 key 时再加上 CertiK / ScamSniffer。被判为钓鱼的项目会终止处理；三层都通过的才显示为已验证。
 - **机会评分**：综合 ROI、声誉、时效性和战略契合度。
 - **Slack 推送**：Block Kit 卡片、单轮 Markdown 报告和每日汇总。
 - **机会处理面板**：`apps/chat-web` 列出新机会，由团队逐条决定跟进或忽略；支持按需校验、只读 Copilot，另有运维页查看扫描、信息源健康度和运行日志。
@@ -129,22 +129,22 @@ pnpm dev
 | Slack | `SLACK_BOT_TOKEN`、`SLACK_CHANNEL_ID` |
 | 搜索 | `GITHUB_TOKEN`、`TAVILY_API_KEYS`、`TAVILY_SUCCESS_COOLDOWN_MINUTES`、`TAVILY_MAX_SOURCES_PER_RUN` |
 | 安全 API | `GOPLUS_API_KEY`、`CERTIK_API_KEY`、`SCAMSNIFFER_API_KEY` |
-| Twitter | `TWITTER_AUTH_INFO_1`、`TWITTER_AUTH_INFO_2`、`TWITTER_PASSWORD`、`TWITTER_TOTP_SECRET`、`TWITTER_COOKIES_FILE`、`TWITTER_FETCH_COUNT` |
-| 运行 | `LOG_LEVEL`、`HEARTBEAT_INTERVAL_MINUTES`、`SOCIAL_WATCH_INTERVAL_MINUTES`、`DAILY_SUMMARY_ENABLED`、`DAILY_SUMMARY_CRON` |
+| Twitter | `TWITTER_AUTH_INFO_1`、`TWITTER_AUTH_INFO_2`、`TWITTER_PASSWORD`、`TWITTER_TOTP_SECRET`、`TWITTER_COOKIES_FILE`、`TWITTER_FETCH_COUNT`、`TWITTER_MAX_TWEET_AGE_DAYS`（默认：`30`）、`RSS_MAX_ENTRIES`（默认：`30`） |
+| 运行 | `LOG_LEVEL`、`HEARTBEAT_INTERVAL_MINUTES`、`SOCIAL_WATCH_INTERVAL_MINUTES`、`DAILY_SUMMARY_ENABLED`、`DAILY_SUMMARY_CRON`、`SCHEDULER_MISFIRE_GRACE_MINUTES`（默认：`720`）、`PIPELINE_STALE_ALERT_HOURS`（默认：`14`）、`RAW_SIGNAL_MAX_ATTEMPTS`（默认：`3`）、`RAW_SIGNAL_PENDING_TIMEOUT_MINUTES`（默认：`120`） |
 | 过滤 | `MIN_AMOUNT_USD`（默认：`5000`）、`STALE_MAX_AGE_DAYS`（默认：`60`）、`STALE_START_DATE_GRACE_DAYS`（默认：`14`） |
-| Chat API | `CHAT_API_INTERNAL_KEY`（需要与前端配置一致） |
+| Chat API | `CHAT_API_INTERNAL_KEY`：必填，至少 16 位随机字符，并与 `apps/chat-web/.env` 中的值一致；缺失时 `chat-api` 拒绝启动 |
 
 `apps/chat-web/.env` 中的前端变量包括 `CHAT_API_BASE_URL`（例如 `http://127.0.0.1:8000`）、`CHAT_API_INTERNAL_KEY`、`DEEPSEEK_API_KEY`、`DEEPSEEK_BASE_URL` 和 `CHAT_AGENT_MODEL`（默认：`deepseek-chat`）。
 
 ## 信息源
 
-信息源配置在 `config/sources.yaml`。每项通过 `fetch_method` 指定抓取方式：`rss`、`web_scraper`、`tavily_search`、`github_search` 或 `twitter`。可选元数据包括：
+信息源配置在 `config/sources.yaml`。每项通过 `fetch_method` 指定抓取方式：`rss`、`web_scraper`、`tavily_search`、`github_search`、`twitter`，或者平台结构化列表 `ethglobal_events`、`superteam_grants`、`devpost_api`；后三种每个黑客松或资助生成一条，自带链接、日期和奖金。可选元数据包括：
 
 - `chain`：生态规范 ID；已批准的链列在 `config/chains.yaml` 中。
 - `source_tier`：`official` 或 `discovery`；搜索发现类信息源默认为 `discovery`。
 - `signal_type`：`grant`、`hackathon`、`social` 或 `discovery`。
 
-官方信息源在校验阶段会获得信任加权；只要截止日期未过，就不会仅因信息较旧而被丢弃。新增信息源类型时，在 `src/fetchers/` 实现 fetcher，在 `src/fetchers/builder.py` 的 `FETCHER_MAP` 中注册，再在 `sources.yaml` 中添加配置。
+官方信息源在校验阶段会获得信任加权。以下两种情况会被当作过期丢弃：截止日期已过；或者信息源自己标注的发布时间（feed 条目、推文）早于 `STALE_MAX_AGE_DAYS` 天且没有截止日期，除非内容写明是滚动申请。没有日期的官方页面会保留。超过 `TWITTER_MAX_TWEET_AGE_DAYS` 天的推文在抓取阶段直接跳过，每轮都从各账号最新的推文读起。新增信息源类型时，在 `src/fetchers/` 实现 fetcher，在 `src/fetchers/builder.py` 的 `FETCHER_MAP` 中注册，再在 `sources.yaml` 中添加配置。
 
 ## 调度策略（Asia/Shanghai）
 
@@ -154,9 +154,11 @@ pnpm dev
 |---|---|
 | `grant_hackathon` | 每天 09:00 和 21:00；每轮搜索所有启用的 Tavily 信息源 |
 | `social_watch` | 每 `SOCIAL_WATCH_INTERVAL_MINUTES` 分钟执行一次（默认：15） |
-| `heartbeat` | 每 `HEARTBEAT_INTERVAL_MINUTES` 分钟执行一次（默认：30），统计运行和信息源健康数据，不发 Slack 消息 |
+| `heartbeat` | 每 `HEARTBEAT_INTERVAL_MINUTES` 分钟执行一次（默认：30），统计运行和信息源健康数据。`grant_hackathon` 连续 `PIPELINE_STALE_ALERT_HOURS` 小时没有成功完成时，或者某个启用中的信息源变为 `down` 时，发一次 Slack 告警（每次中断只发一次） |
 | `daily_summary` | 按 `DAILY_SUMMARY_CRON` 执行（默认：23:55） |
 | `tavily_unlock` | 每天 00:00 清除 Tavily 信息源的成功冷却 |
+
+主机休眠或繁忙时错过的任务，会在调度器恢复后补跑，最多可以晚 `SCHEDULER_MISFIRE_GRACE_MINUTES` 分钟（日报最多晚 1 小时）；积压的多次错过只补跑一次。
 
 Bounty 不在系统范围内：`bounty` 任务没有注册，分类器也会把 bounty 类信息视为噪音。
 
@@ -171,11 +173,11 @@ Bounty 不在系统范围内：`bounty` 任务没有注册，分类器也会把 
 
 `apps/chat-web` 是一个 Next.js 应用，后端是 `chat-api`，包含两个页面：
 
-- **机会处理页**（`/`）：左边是机会列表，右边是当前选中机会的详情。每条机会处于 *New*（待处理）、*Shortlisted*（跟进）或 *Dismissed*（忽略）三种状态之一，状态存在 `events.triage_status` 字段里，整个团队共享。搜索、筛选、排序和当前选中项都记录在 URL 里，把链接发给同事就能打开同一个视图。快捷键：`J`/`K` 上下移动，`S` 跟进，`D` 忽略，`Z` 撤销，`O` 打开申请页，`/` 搜索。
+- **机会处理页**（`/`）：左边是机会列表，右边是当前选中机会的详情。每条机会处于 *New*（待处理）、*Shortlisted*（跟进）或 *Dismissed*（忽略）三种状态之一，状态存在 `events.triage_status` 字段里，整个团队共享。搜索、筛选、排序和当前选中项都记录在 URL 里，把链接发给同事就能打开同一个视图。快捷键：`J`/`K` 上下移动，`S` 跟进，`D` 忽略，`Z` 撤销，`O` 打开申请页（没有申请链接时打开来源页），`/` 搜索。截止日期已过的机会在每轮运行后标为已过期并移出列表（已跟进的保留）；没有截止日期时，只有内容写明滚动申请才显示 *rolling*，否则显示 *deadline not stated*。以代币计价的金额会附上大致的美元估值，列表可以按奖金排序。
 - **详情标签页：** *Overview*（简介、分项评分、来源）、*Verification*（可信度评分、证据、相似历史事件、参与方式；点击后才运行）、*Ask Copilot*（只读助手，回答都基于数据库工具）。
 - **运维页**（`/operations`）：手动扫描、信息源健康度（默认只列出有问题的源）、最近运行记录，以及维护操作：立即发送日报、解除 Tavily 锁、重置去重索引。
 
-后端接口位于 `/api/v1/dashboard/*`、`/api/v1/chat/*` 和 `/api/v1/admin/*`（参见 `src/chat_api/app.py`）。除 `chat/health` 外，其余接口都需要 `X-Internal-Key` 请求头。前端可以部署到 Vercel，并配置相同的 `CHAT_API_*` 变量。`chat-api` 会写入处理状态和删除记录，因此需要 `events` 表的写权限；它的凭据应与 pipeline 分开。
+后端接口位于 `/api/v1/dashboard/*`、`/api/v1/chat/*` 和 `/api/v1/admin/*`（参见 `src/chat_api/app.py`）。除 `chat/health` 外，其余接口都需要 `X-Internal-Key` 请求头。鉴权默认拒绝：`CHAT_API_INTERNAL_KEY` 缺失或短于 16 位时 `chat-api` 拒绝启动；运行中 key 被清空，所有请求也会被拒绝。前端可以部署到 Vercel，并配置相同的 `CHAT_API_*` 变量。`chat-api` 会写入处理状态和删除记录，因此需要 `events` 表的写权限；它的凭据应与 pipeline 分开。目前 `docker-compose.yml` 让两个服务读取同一份 `.env`，在拆分之前它们共用同一套数据库凭据。
 
 ## 目录结构
 
@@ -212,4 +214,4 @@ pnpm test
 
 ## 运维
 
-数据库备份和恢复、数据库迁移（升级到机会处理面板前需先执行 `scripts/migrate_events_triage_status.py`）、运维脚本、信息源健康度查询及常见问题排查，请参阅[运维手册](docs/operations.md)。
+数据库备份和恢复、数据库迁移（升级到机会处理面板前需先执行 `scripts/migrate_events_triage_status.py`，升级到失败信号重试前需先执行 `scripts/migrate_raw_signals_processing_state.py`）、运维脚本、信息源健康度查询及常见问题排查，请参阅[运维手册](docs/operations.md)。

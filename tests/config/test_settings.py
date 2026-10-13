@@ -42,6 +42,30 @@ def test_daily_summary_settings_have_safe_defaults(isolated_defaults) -> None:
     assert settings.DAILY_SUMMARY_CRON == "55 23 * * *"
 
 
+def test_scheduler_catch_up_and_stale_alert_defaults(isolated_defaults) -> None:
+    """A run missed during host sleep is caught up within one 12h cycle, and a
+    main pipeline that has not succeeded for 12h + 2h margin is reported."""
+    settings = Settings()
+
+    assert settings.SCHEDULER_MISFIRE_GRACE_MINUTES == 720
+    assert settings.PIPELINE_STALE_ALERT_HOURS == 14
+
+
+def test_tweets_older_than_a_month_are_not_ingested_by_default(isolated_defaults) -> None:
+    assert Settings().TWITTER_MAX_TWEET_AGE_DAYS == 30
+
+
+def test_failed_signals_are_retried_a_bounded_number_of_times(isolated_defaults) -> None:
+    settings = Settings()
+
+    assert settings.RAW_SIGNAL_MAX_ATTEMPTS == 3
+    assert settings.RAW_SIGNAL_PENDING_TIMEOUT_MINUTES == 120
+
+
+def test_rss_reads_only_the_newest_entries_by_default(isolated_defaults) -> None:
+    assert Settings().RSS_MAX_ENTRIES == 30
+
+
 def test_llm_calls_have_a_finite_timeout_and_retry_budget(isolated_defaults) -> None:
     """An unbounded SDK default let one hung provider stall the item loop."""
     settings = Settings()

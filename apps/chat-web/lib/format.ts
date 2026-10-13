@@ -1,11 +1,11 @@
 const DAY_MS = 86_400_000;
 
 export type DeadlineInfo = {
-  /** Short relative label: "closes in 4d", "closes today", "rolling", "closed". */
+  /** Short relative label: "closes in 4d", "closes today", "rolling", "deadline not stated", "closed". */
   label: string;
-  /** Exact date for tooltips, or null for rolling programmes. */
+  /** Exact date for tooltips, or null when there is no deadline. */
   exact: string | null;
-  state: "urgent" | "open" | "rolling" | "closed";
+  state: "urgent" | "open" | "rolling" | "unknown" | "closed";
   daysLeft: number | null;
 };
 
@@ -39,16 +39,35 @@ export function formatDateTime(iso: string | null | undefined): string {
 /** Deadlines inside this many days are urgent (rendered red). */
 export const URGENT_DAYS = 7;
 
-export function describeDeadline(iso: string | null, now: Date = new Date()): DeadlineInfo {
-  if (!iso) return { label: "rolling", exact: null, state: "rolling", daysLeft: null };
-  const deadline = new Date(iso);
-  if (Number.isNaN(deadline.getTime())) {
-    return { label: "rolling", exact: null, state: "rolling", daysLeft: null };
+/** A date-only deadline (stored as 00:00 UTC) lasts through that day anywhere on earth (UTC-12). */
+const END_OF_DAY_ANYWHERE_MS = 36 * 3_600_000;
+
+function isDateOnly(date: Date): boolean {
+  return date.getUTCHours() === 0 && date.getUTCMinutes() === 0 && date.getUTCSeconds() === 0 && date.getUTCMilliseconds() === 0;
+}
+
+function utcDayNumber(date: Date): number {
+  return Math.floor(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()) / DAY_MS);
+}
+
+export function describeDeadline(
+  iso: string | null,
+  now: Date = new Date(),
+  { rolling = false }: { rolling?: boolean } = {}
+): DeadlineInfo {
+  const deadline = iso ? new Date(iso) : null;
+  if (!deadline || Number.isNaN(deadline.getTime())) {
+    return rolling
+      ? { label: "rolling", exact: null, state: "rolling", daysLeft: null }
+      : { label: "deadline not stated", exact: null, state: "unknown", daysLeft: null };
   }
   const exact = formatDate(iso);
-  const diff = deadline.getTime() - now.getTime();
-  if (diff < 0) return { label: "closed", exact, state: "closed", daysLeft: null };
-  const daysLeft = Math.floor(diff / DAY_MS);
+  const dateOnly = isDateOnly(deadline);
+  const end = deadline.getTime() + (dateOnly ? END_OF_DAY_ANYWHERE_MS : 0);
+  if (end < now.getTime()) return { label: "closed", exact, state: "closed", daysLeft: null };
+  const daysLeft = dateOnly
+    ? Math.max(0, utcDayNumber(deadline) - utcDayNumber(now))
+    : Math.floor((end - now.getTime()) / DAY_MS);
   const label = daysLeft === 0 ? "closes today" : `closes in ${daysLeft}d`;
   return { label, exact, state: daysLeft <= URGENT_DAYS ? "urgent" : "open", daysLeft };
 }
@@ -84,9 +103,26 @@ export function formatScore(score: number | null | undefined): string {
   return score === null || score === undefined ? "—" : score.toFixed(1);
 }
 
-export function formatAmount(amount: string | null | undefined): string {
+/** "$3.9M", "$62K", "$800": an estimate, so two significant figures are plenty. */
+function usdShort(value: number): string {
+  for (const [divisor, suffix] of [[1e9, "B"], [1e6, "M"], [1e3, "K"]] as const) {
+    if (value >= divisor) {
+      const scaled = value / divisor;
+      return `$${scaled < 10 ? Number(scaled.toPrecision(2)) : Math.round(scaled)}${suffix}`;
+    }
+  }
+  return `$${Math.round(value)}`;
+}
+
+/** A ticker other than USD ("OP", "APT", "USDC") means part of the amount is not in dollars. */
+const NON_USD_TICKER = /\b(?!USD\b)[A-Z]{2,6}\b/;
+
+/** The stated amount, with a USD estimate unless it is already a plain dollar figure. */
+export function formatAmount(amount: string | null | undefined, amountUsd?: number | null): string {
   const trimmed = (amount ?? "").trim();
-  return trimmed && trimmed !== "-" ? trimmed : "Amount not stated";
+  if (!trimmed || trimmed === "-") return "Amount not stated";
+  const plainDollars = trimmed.startsWith("$") && !NON_USD_TICKER.test(trimmed);
+  return amountUsd && !plainDollars && !trimmed.includes("≈") ? `${trimmed} (≈ ${usdShort(amountUsd)})` : trimmed;
 }
 
 export function formatType(type: string): string {

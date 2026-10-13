@@ -141,6 +141,42 @@ docker compose up -d --remove-orphans
 
 最后再部署前端。
 
+原始信号处理状态迁移（给 `raw_signals` 表加 `status` / `attempts` / `last_error` / `processed_at` 字段，已有记录回填为 `done`）。**升级到带失败重试的版本前必须先执行**，否则 pipeline 启动后查询会报字段不存在。步骤同上：先 `docker compose build pipeline chat-api`，再执行迁移，最后 `docker compose up -d`。脚本可以重复执行：
+
+```bash
+docker compose run --rm pipeline python -m scripts.migrate_raw_signals_processing_state
+```
+
+处理失败（LLM 不可用、单条处理出错）的信号会标为 `failed`，下次抓到同样内容时自动重试，最多 `RAW_SIGNAL_MAX_ATTEMPTS` 次（默认 3）。查看重试耗尽或仍在失败的信号：
+
+```bash
+docker compose exec -T postgres psql -U web3agent -d web3agent -c "select id, source_name, attempts, left(last_error, 80) from raw_signals where status = 'failed' order by fetched_at desc limit 20;"
+```
+
+金额与滚动申请字段迁移（给 `events` 表加 `amount_usd` / `is_rolling` 字段，并按已有的 `amount` 回填 `amount_usd`）。**升级到按奖金排序、区分"滚动申请/截止未知"的版本前必须先执行**，步骤同上。脚本可以重复执行：
+
+```bash
+docker compose run --rm pipeline python -m scripts.migrate_events_amount_usd_rolling
+```
+
+重新校验：校验结论只在事件创建时记录一次，校验逻辑改了之后，已有事件的结论还是旧规则算的。下面的脚本按当前规则重新校验所有在线事件（每个事件发一次可访问性检查和一次 GoPlus 查询），先加 `--dry-run` 看结果：
+
+```bash
+docker compose run --rm pipeline python -m scripts.reverify_events --dry-run
+```
+
+去重索引维护：把已有事件的生态字段归一（`bnb chain`、`binance` → `bnb`），并用当前的向量文本（标题 + 描述）重建全部事件的向量。改过向量文本或生态映射之后执行一次，可以重复执行；先加 `--dry-run` 看会改什么：
+
+```bash
+docker compose run --rm pipeline python -m scripts.rebuild_dedup_index --dry-run
+```
+
+合并历史重复事件：按当前去重规则（同一条推文 / feed 条目 / 搜索结果 / 平台列表链接，或忽略通用词后标题相同且截止日期和链不冲突）找出重复组。每组保留团队处理过的那条（shortlisted 优先于 dismissed），否则保留来源最多的；来源、推送记录和缺失字段并入保留的那条，其余删除。默认只列出计划，加 `--apply` 才写入：
+
+```bash
+docker compose run --rm pipeline python -m scripts.merge_duplicate_events
+```
+
 其他数据迁移和清理脚本见 `scripts/`，各脚本顶部的 docstring 写明了用法。
 
 ## 5. 信息源健康度

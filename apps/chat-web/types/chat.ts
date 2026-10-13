@@ -112,7 +112,7 @@ export type InvestigationResponse = {
 
 export type TriageStatus = "new" | "shortlisted" | "dismissed";
 export type TriageTab = TriageStatus | "all";
-export type OpportunitySort = "score" | "deadline" | "newest";
+export type OpportunitySort = "score" | "deadline" | "newest" | "reward";
 export type SourceTrust = "official" | "discovery";
 
 export type OpportunityScores = {
@@ -131,15 +131,22 @@ export type DashboardOpportunityItem = {
   summary: string;
   ecosystem: string | null;
   amount: string | null;
-  /** ISO-8601, or null for rolling programmes. */
+  /** Rough USD reading of `amount`; null when it could not be read. */
+  amount_usd: number | null;
+  /** ISO-8601, or null when no deadline was stated. */
   deadline: string | null;
+  /** With no deadline: true when the programme accepts applications on a rolling basis. */
+  rolling: boolean;
   first_seen: string | null;
   heat: number;
   source_count: number;
   verified: boolean;
   verification_verdict: string;
   source_trust: SourceTrust | string;
+  /** The application page, or "" when none was found. */
   apply_url: string;
+  /** Where the opportunity was found (tweet, article, programme page). */
+  source_url: string;
   triage_status: TriageStatus;
 };
 

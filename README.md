@@ -28,11 +28,11 @@ Web3 Grant Radar continuously monitors ecosystem feeds, project websites, Tavily
 
 ## Features
 
-- **Multi-source discovery** — RSS, website scraping, Tavily search, and X/Twitter via Twikit, configured centrally in `config/sources.yaml`. A GitHub issue-search fetcher is also available, though no GitHub sources are configured by default.
+- **Multi-source discovery** — RSS, website scraping, Tavily search, X/Twitter via Twikit, and structured platform listings (ETHGlobal events, Superteam Earn grants, Devpost hackathons), configured centrally in `config/sources.yaml`. A GitHub issue-search fetcher is also available, though no GitHub sources are configured by default.
 - **Two-stage deduplication** — L1 canonical-URL deduplication, followed by L2 semantic deduplication with ChromaDB embeddings and deadline/ecosystem vetoes.
 - **LLM-assisted classification** — keyword prefiltering, then DeepSeek / Qwen / Gemini classification with provider fallback.
 - **Quality gates** — reject opportunities that are not actionable, fall below the minimum reward, or are stale.
-- **Zero-trust verification** — origin anchoring, GitHub/domain cross-checks, and security APIs (GoPlus / CertiK / ScamSniffer). Items judged fraudulent are stopped.
+- **Zero-trust verification** — origin anchoring, a reachability cross-check of the apply/source page, and security APIs: GoPlus's phishing-site check (no key needed) plus CertiK / ScamSniffer when their keys are set. Items flagged as phishing are stopped; only an item that passes all three layers is shown as verified.
 - **Opportunity scoring** — ROI, reputation, timeliness, and strategic fit.
 - **Slack delivery** — Block Kit cards, per-run Markdown reports, and a daily summary.
 - **Triage dashboard** — `apps/chat-web` lists new opportunities for the team to shortlist or dismiss, with on-demand verification, a read-only Copilot, and an operations page for scans, source health, and run logs.
@@ -129,22 +129,22 @@ Environment variables are read by `config/settings.py`. Recreate the containers 
 | Slack | `SLACK_BOT_TOKEN`, `SLACK_CHANNEL_ID` |
 | Search | `GITHUB_TOKEN`, `TAVILY_API_KEYS`, `TAVILY_SUCCESS_COOLDOWN_MINUTES`, `TAVILY_MAX_SOURCES_PER_RUN` |
 | Security APIs | `GOPLUS_API_KEY`, `CERTIK_API_KEY`, `SCAMSNIFFER_API_KEY` |
-| Twitter | `TWITTER_AUTH_INFO_1`, `TWITTER_AUTH_INFO_2`, `TWITTER_PASSWORD`, `TWITTER_TOTP_SECRET`, `TWITTER_COOKIES_FILE`, `TWITTER_FETCH_COUNT` |
-| Runtime | `LOG_LEVEL`, `HEARTBEAT_INTERVAL_MINUTES`, `SOCIAL_WATCH_INTERVAL_MINUTES`, `DAILY_SUMMARY_ENABLED`, `DAILY_SUMMARY_CRON` |
+| Twitter | `TWITTER_AUTH_INFO_1`, `TWITTER_AUTH_INFO_2`, `TWITTER_PASSWORD`, `TWITTER_TOTP_SECRET`, `TWITTER_COOKIES_FILE`, `TWITTER_FETCH_COUNT`, `TWITTER_MAX_TWEET_AGE_DAYS` (default: `30`), `RSS_MAX_ENTRIES` (default: `30`) |
+| Runtime | `LOG_LEVEL`, `HEARTBEAT_INTERVAL_MINUTES`, `SOCIAL_WATCH_INTERVAL_MINUTES`, `DAILY_SUMMARY_ENABLED`, `DAILY_SUMMARY_CRON`, `SCHEDULER_MISFIRE_GRACE_MINUTES` (default: `720`), `PIPELINE_STALE_ALERT_HOURS` (default: `14`), `RAW_SIGNAL_MAX_ATTEMPTS` (default: `3`), `RAW_SIGNAL_PENDING_TIMEOUT_MINUTES` (default: `120`) |
 | Filtering | `MIN_AMOUNT_USD` (default: `5000`), `STALE_MAX_AGE_DAYS` (default: `60`), `STALE_START_DATE_GRACE_DAYS` (default: `14`) |
-| Chat API | `CHAT_API_INTERNAL_KEY` (must match the frontend setting) |
+| Chat API | `CHAT_API_INTERNAL_KEY`: required, at least 16 random characters, and the same value as in `apps/chat-web/.env`. `chat-api` refuses to start without it |
 
 Frontend variables in `apps/chat-web/.env` include `CHAT_API_BASE_URL` (for example, `http://127.0.0.1:8000`), `CHAT_API_INTERNAL_KEY`, `DEEPSEEK_API_KEY`, `DEEPSEEK_BASE_URL`, and `CHAT_AGENT_MODEL` (default: `deepseek-chat`).
 
 ## Sources
 
-Sources are defined in `config/sources.yaml`. Each entry selects a `fetch_method`: `rss`, `web_scraper`, `tavily_search`, `github_search`, or `twitter`. Optional metadata includes:
+Sources are defined in `config/sources.yaml`. Each entry selects a `fetch_method`: `rss`, `web_scraper`, `tavily_search`, `github_search`, `twitter`, or one of the structured platform listings `ethglobal_events`, `superteam_grants` and `devpost_api`, which emit one item per hackathon or grant with its own URL, dates and reward. Optional metadata includes:
 
 - `chain` — canonical ecosystem ID; approved chains are listed in `config/chains.yaml`.
 - `source_tier` — `official` or `discovery`. Search-based sources default to `discovery`.
 - `signal_type` — `grant`, `hackathon`, `social`, or `discovery`.
 
-Official sources receive a trust uplift during verification and are not discarded as stale unless their deadline has passed. To add a source type, implement a fetcher under `src/fetchers/`, register it in `FETCHER_MAP` in `src/fetchers/builder.py`, and add entries to `sources.yaml`.
+Official sources receive a trust uplift during verification. They are discarded as stale when their deadline has passed, or when the source dated the item (feed entry, tweet) more than `STALE_MAX_AGE_DAYS` ago with no deadline, unless the content says applications are rolling. Undated official pages are kept. Tweets older than `TWITTER_MAX_TWEET_AGE_DAYS` are skipped at fetch time, and every run reads each account's newest tweets. To add a source type, implement a fetcher under `src/fetchers/`, register it in `FETCHER_MAP` in `src/fetchers/builder.py`, and add entries to `sources.yaml`.
 
 ## Schedule (Asia/Shanghai)
 
@@ -154,9 +154,11 @@ The source of truth is `src/scheduler/jobs.py`. The `schedules:` block in `sourc
 |---|---|
 | `grant_hackathon` | Daily at 09:00 and 21:00; every enabled Tavily source is searched in each run |
 | `social_watch` | Every `SOCIAL_WATCH_INTERVAL_MINUTES` minutes (default: 15) |
-| `heartbeat` | Every `HEARTBEAT_INTERVAL_MINUTES` minutes (default: 30); collects run and source-health stats (no Slack message) |
+| `heartbeat` | Every `HEARTBEAT_INTERVAL_MINUTES` minutes (default: 30); collects run and source-health stats. Sends a Slack alert, once per outage, when `grant_hackathon` has not completed successfully for `PIPELINE_STALE_ALERT_HOURS` hours, or when an enabled source goes `down` |
 | `daily_summary` | According to `DAILY_SUMMARY_CRON` (default: 23:55) |
 | `tavily_unlock` | Daily at 00:00; clears the Tavily success cooldowns |
+
+A run missed while the host was asleep or busy still fires when the scheduler wakes up, up to `SCHEDULER_MISFIRE_GRACE_MINUTES` late (the daily summary only up to an hour late), and a backlog of missed runs collapses into a single run.
 
 Bounties are out of scope: the `bounty` job is not registered, and the classifier treats bounty items as noise.
 
@@ -171,11 +173,11 @@ Bounties are out of scope: the `bounty` job is not registered, and the classifie
 
 `apps/chat-web` is a Next.js app backed by `chat-api`, with two pages:
 
-- **Triage** (`/`): the opportunity list on the left, the selected opportunity on the right. Each opportunity is *New*, *Shortlisted*, or *Dismissed*; the decision is stored in `events.triage_status` and shared by the whole team. Search, filters, sorting, and the selection live in the URL, so a link opens the same view. Keyboard: `J`/`K` move, `S` shortlist, `D` dismiss, `Z` undo, `O` open the apply page, `/` search.
+- **Triage** (`/`): the opportunity list on the left, the selected opportunity on the right. Each opportunity is *New*, *Shortlisted*, or *Dismissed*; the decision is stored in `events.triage_status` and shared by the whole team. Search, filters, sorting, and the selection live in the URL, so a link opens the same view. Keyboard: `J`/`K` move, `S` shortlist, `D` dismiss, `Z` undo, `O` open the apply page (or the source when no apply link was found), `/` search. Opportunities past their deadline are marked expired after each run and leave the list (shortlisted ones stay); a missing deadline reads *rolling* only when the programme says applications are rolling, otherwise *deadline not stated*. Amounts in tokens show a rough USD estimate, and the list can be sorted by reward.
 - **Detail tabs:** *Overview* (summary, score breakdown, sources), *Verification* (trust score, evidence, similar past events, ways to take part; runs on request), and *Ask Copilot* (a read-only assistant that answers from database tools).
 - **Operations** (`/operations`): manual scan, source health (problems first), recent runs, and maintenance actions — send the daily summary, unlock Tavily sources, reset the dedup index.
 
-Backend routes live under `/api/v1/dashboard/*`, `/api/v1/chat/*`, and `/api/v1/admin/*` (see `src/chat_api/app.py`). Every route except `chat/health` requires the `X-Internal-Key` header. The frontend can be deployed to Vercel with the same `CHAT_API_*` variables. `chat-api` writes triage decisions and deletions, so it needs write access to `events`; keep its credentials separate from the pipeline's.
+Backend routes live under `/api/v1/dashboard/*`, `/api/v1/chat/*`, and `/api/v1/admin/*` (see `src/chat_api/app.py`). Every route except `chat/health` requires the `X-Internal-Key` header. Auth fails closed: `chat-api` refuses to start when `CHAT_API_INTERNAL_KEY` is missing or shorter than 16 characters, and rejects requests if the key is ever unset. The frontend can be deployed to Vercel with the same `CHAT_API_*` variables. `chat-api` writes triage decisions and deletions, so it needs write access to `events`; keep its credentials separate from the pipeline's. `docker-compose.yml` currently gives both services the same `.env`, so they share database credentials until you split them.
 
 ## Project layout
 
@@ -212,4 +214,4 @@ pnpm test
 
 ## Operations
 
-Database backup and restore, migrations (run `scripts/migrate_events_triage_status.py` before upgrading to the triage dashboard), operations scripts, source-health queries, and troubleshooting are covered in the [operations guide](docs/operations.md) (in Chinese).
+Database backup and restore, migrations (run `scripts/migrate_events_triage_status.py` before upgrading to the triage dashboard, and `scripts/migrate_raw_signals_processing_state.py` before upgrading to failed-signal retries), operations scripts, source-health queries, and troubleshooting are covered in the [operations guide](docs/operations.md) (in Chinese).

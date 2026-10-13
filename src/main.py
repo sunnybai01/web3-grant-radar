@@ -3,6 +3,7 @@
 Wires together the full V1 pipeline:
   Fetcher → L1 Dedup → L2 Dedup → LLM Classify → Zero-trust Verify → Score → Slack Push
 """
+import email.utils
 import logging
 import re
 import sys
@@ -21,7 +22,10 @@ from src.classifier.amount_filter import parse_amount_usd
 from src.classifier.keyword_filter import KeywordFilter
 from src.classifier.llm_gateway import LLMGateway
 from src.classifier.classifier import Classification, OpportunityClassifier
+from src.classifier.prompts import current_date_label
 from src.classifier.scorer import OpportunityScorer
+from src.deadlines import deadline_passed
+from src.fetchers.links import expand_short_link
 from src.verifier.verifier import verify_opportunity
 from src.dispatch.slack_client import SlackDispatcher
 from src.dispatch.daily_summary_service import build_daily_summary
@@ -41,6 +45,8 @@ from src.db.queries import (
     mark_daily_summary_sent,
     mark_daily_summary_failed,
     unlock_tavily_cooldown,
+    mark_raw_signal_processed,
+    expire_past_deadline_events,
 )
 
 logging.basicConfig(
@@ -71,6 +77,8 @@ EVENT_MODEL_FIELDS = {
     "start_date",
     "deadline",
     "amount",
+    "amount_usd",
+    "is_rolling",
     "track",
     "ecosystem",
     "application_url",
@@ -196,14 +204,28 @@ def _parse_datetime(value):
         try:
             parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
         except ValueError:
-            return None
+            # Tavily news returns RFC 2822 ("Fri, 09 Oct 2026 08:44:57 GMT"). Read
+            # as ISO only, every Tavily result looked undated and was dropped as
+            # missing_published_at.
+            try:
+                parsed = email.utils.parsedate_to_datetime(value)
+            except (TypeError, ValueError):
+                return None
         return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
     return None
 
 
-def _published_at(item) -> datetime | None:
+# Where the secondary page scrape records the publication date it extracted. Kept
+# apart from the dates fetchers stamp so official sources can ignore a guess.
+SCRAPED_PUBLISHED_KEY = "scraped_published_date"
+
+
+def _published_at(item, include_scraped: bool = True) -> datetime | None:
     metadata = item.metadata or {}
-    for key in ("created_at", "published_at", "published_date", "published"):
+    keys = ("created_at", "published_at", "published_date", "published")
+    if include_scraped:
+        keys += (SCRAPED_PUBLISHED_KEY,)
+    for key in keys:
         published_at = _parse_datetime(metadata.get(key))
         if published_at is not None:
             return published_at
@@ -230,6 +252,14 @@ def _title_years_all_past(title: str | None, now: datetime) -> bool:
     return all(year < now.year for year in years)
 
 
+def _is_rolling(structured: dict) -> bool:
+    """The classifier's is_rolling flag, tolerating a stringly-typed value."""
+    value = structured.get("is_rolling")
+    if isinstance(value, str):
+        return value.strip().lower() in {"true", "yes", "1"}
+    return value is True
+
+
 def _staleness_reason(
     item, structured: dict | None, source_tier: str = "discovery", now: datetime | None = None
 ) -> str | None:
@@ -238,10 +268,11 @@ def _staleness_reason(
     Strategy (relaxed):
     - deadline present AND in the past → definitely expired, drop
     - no deadline AND every year in the title is a past year → drop
+    - published >60 days ago with no deadline → likely stale, drop. Official
+      sources are exempt only when the content says the program is rolling.
     - discovery source whose start date passed >grace ago with no deadline → drop
     - discovery source with no published date AND no deadline → too uncertain, drop
-    - discovery source published >60 days ago with no deadline → likely stale, drop
-    - official source → never dropped for staleness (could be rolling)
+    - official source without a published date → kept (program pages are undated)
 
     A future deadline short-circuits every weaker rule below it: an explicitly stated
     open window outranks any inference drawn from a title or a publication date.
@@ -250,9 +281,10 @@ def _staleness_reason(
     structured = structured or {}
     tier = (source_tier or "discovery").lower()
 
-    # If we have a deadline and it's in the past → definitely expired
+    # If we have a deadline and it's in the past → definitely expired. A date-only
+    # deadline lasts through that whole day (see src.deadlines).
     deadline = _parse_datetime(structured.get("deadline"))
-    if deadline is not None and deadline < now:
+    if deadline_passed(deadline, now=now):
         return "deadline_expired"
 
     # A past year in the title is about as strong as a past deadline ("ETHIndiaVilla
@@ -261,9 +293,20 @@ def _staleness_reason(
     if deadline is None and _title_years_all_past(structured.get("title"), now):
         return "title_year_past"
 
-    # Official sources are always kept (their announcements are assumed rolling
-    # when no explicit deadline is given).
+    # Official sources are trusted, not fresh: a 2023 official tweet about "Round 2"
+    # was pushed as a new opportunity in 2026 when official sources skipped this
+    # rule. Only a program the content itself calls rolling survives its age. The
+    # date must be one the source stamped (feed entry, tweet): official program
+    # pages are undated, and a date scraped off such a page is only a guess.
     if tier == "official":
+        stamped_at = _published_at(item, include_scraped=False)
+        if (
+            deadline is None
+            and stamped_at is not None
+            and now - stamped_at > STALE_EVENT_MAX_AGE
+            and not _is_rolling(structured)
+        ):
+            return "published_too_old"
         return None
 
     published_at = _published_at(item)
@@ -313,11 +356,14 @@ def _try_extract_dates_from_url(url: str, llm: LLMGateway) -> dict | None:
         text = container.get_text(separator="\n", strip=True)[:DATE_SCRAPE_MAX_CHARS]
 
         prompt = (
+            f"Today's date: {current_date_label()}\n"
             "Extract ONLY the dates below from this web page. "
             "Return JSON with no extra text:\n"
             '{"published_date": "ISO 8601 or null", "deadline": "ISO 8601 or null", '
             '"start_date": "ISO 8601 or null"}\n'
-            "start_date is when the program, event, or application window opens.\n\n"
+            "start_date is when the program, event, or application window opens. "
+            "A date written without a year refers to its nearest occurrence after the "
+            "page's publication date (or after today when that is unknown).\n\n"
             f"Page text:\n{text}"
         )
         result = llm.classify_structured(
@@ -351,13 +397,22 @@ def _process_item(db, item, signal_id, schedule: str):
 
     if classification.failed:
         logger.error(
-            "[%s] Classification failed for %s (%s): %s",
-            schedule, item.source_name, classification.llm_error,
+            "[%s] Classification failed for %s signal #%s (%s): %s",
+            schedule, item.source_name, signal_id, classification.llm_error,
             (item.metadata or {}).get("title", "")[:80],
         )
         return None, ["llm_errors"]
 
     if not classification.is_opportunity:
+        # data is present only when the LLM itself judged the item (keyword-filter
+        # rejections carry none); counting those keeps precision auditable.
+        if classification.data is not None:
+            logger.info(
+                "[%s] Not an opportunity (%s) from %s: %s",
+                schedule, classification.data.get("noise_reason") or "unspecified",
+                item.source_name, (item.metadata or {}).get("title", "")[:80],
+            )
+            return None, ["noise"]
         return None, []
 
     structured = classification.data or {}
@@ -406,7 +461,7 @@ def _process_item(db, item, signal_id, schedule: str):
             # _published_at can pick it up.
             pub = extra_dates.get("published_date")
             if pub and not _published_at(item):
-                item.metadata["published_date"] = pub
+                item.metadata[SCRAPED_PUBLISHED_KEY] = pub
 
     staleness_reason = _staleness_reason(item, structured, source_tier=source_tier)
     if staleness_reason:
@@ -431,9 +486,11 @@ def _process_item(db, item, signal_id, schedule: str):
         "start_date": structured.get("start_date"),
         "deadline": structured.get("deadline"),
         "amount": structured.get("amount"),
+        "amount_usd": amount_usd,
+        "is_rolling": _is_rolling(structured) if "is_rolling" in structured else None,
         "track": structured.get("track"),
         "ecosystem": structured.get("ecosystem"),
-        "application_url": structured.get("application_url"),
+        "application_url": expand_short_link(structured.get("application_url")),
         "source_url": item.raw_url,
         "source_type": item.source_type,
         "source_platform": structured.get("source_platform") or item.source_name,
@@ -517,6 +574,21 @@ def _process_item(db, item, signal_id, schedule: str):
     return full_event, outcomes
 
 
+def _rollback(db) -> None:
+    try:
+        db.rollback()
+    except Exception:
+        logger.exception("Session rollback failed")
+
+
+def _record_signal_outcome(db, signal_id, error=None) -> None:
+    try:
+        mark_raw_signal_processed(db, signal_id, error=error)
+    except Exception:
+        _rollback(db)
+        logger.exception("Could not record the outcome of raw signal #%s", signal_id)
+
+
 def run_pipeline(schedule: str):
     """Run the full pipeline for one schedule type."""
     global _stats_reset_day
@@ -532,9 +604,9 @@ def run_pipeline(schedule: str):
 
     db = SessionLocal()
     log = create_schedule_log(db, f"pipeline_{schedule}")
-    stats = {"fetched": 0, "new": 0, "deduped": 0, "classified": 0,
+    stats = {"fetched": 0, "new": 0, "deduped": 0, "classified": 0, "noise": 0,
              "unactionable": 0, "low_amount": 0, "stale": 0, "verified": 0,
-             "fraud": 0, "pushed": 0, "llm_errors": 0, "item_errors": 0}
+             "fraud": 0, "pushed": 0, "expired": 0, "llm_errors": 0, "item_errors": 0}
     result = None
 
     try:
@@ -582,7 +654,15 @@ def run_pipeline(schedule: str):
         # --- Phase 2: L1 URL Dedup ---
         l1_results = []
         for item in items:
-            signal_id = process_item_l1(db, item)
+            try:
+                signal_id = process_item_l1(db, item)
+            except Exception as e:
+                # A failed raw_signals write is not a duplicate, and must not take
+                # the rest of the batch down with it.
+                stats["item_errors"] += 1
+                _rollback(db)
+                logger.exception("[%s] L1 failed for item from %s: %s", schedule, item.source_name, e)
+                continue
             if signal_id:
                 l1_results.append((item, signal_id))
             else:
@@ -603,7 +683,17 @@ def run_pipeline(schedule: str):
                     "[%s] Item from %s failed and was skipped: %s",
                     schedule, item.source_name, e,
                 )
+                # A failed DB statement leaves the session unusable for every
+                # remaining item until it is rolled back.
+                _rollback(db)
+                _record_signal_outcome(db, signal_id, error=f"{type(e).__name__}: {e}")
                 continue
+
+            # Failed signals are retried on their next fetch instead of being
+            # treated as seen; everything else was judged and is done.
+            _record_signal_outcome(
+                db, signal_id, error="classification_failed" if "llm_errors" in outcomes else None
+            )
 
             for outcome in outcomes:
                 stats[outcome] = stats.get(outcome, 0) + 1
@@ -636,6 +726,13 @@ def run_pipeline(schedule: str):
                 "[%s] %d item(s) failed mid-pipeline and were skipped.", schedule, stats["item_errors"],
             )
 
+        # Past-deadline opportunities leave the dashboard and the daily summary.
+        try:
+            stats["expired"] = expire_past_deadline_events(db)
+        except Exception as e:
+            _rollback(db)
+            logger.exception("[%s] Expiring past-deadline events failed: %s", schedule, e)
+
         finish_schedule_log(db, log.id, items_fetched=stats["fetched"],
                            items_new=stats["new"], items_deduped=stats["deduped"],
                            items_classified=stats["classified"],
@@ -667,7 +764,7 @@ def run_heartbeat():
         else:
             _slack.send_heartbeat(stats_or_msg)
 
-    heartbeat(_hb_slack)
+    heartbeat(_hb_slack, active_sources=set(_fetcher_registry._fetchers))
 
 
 def run_social_watch():

@@ -7,6 +7,8 @@ import hashlib
 import feedparser
 import httpx
 
+from config.settings import settings
+
 from .base import BaseFetcher, FetchedItem, FetchError
 
 logger = logging.getLogger(__name__)
@@ -30,9 +32,19 @@ class RSSFetcher(BaseFetcher):
             raise FetchError(str(e)) from e
 
         feed = feedparser.parse(resp.text)
+        if not feed.entries:
+            # feedparser turns an HTML page into zero entries without raising, which
+            # recorded broken feeds as healthy for months. An empty result is a failure.
+            if not feed.get("version"):
+                raise FetchError(
+                    f"{url} is not a valid feed "
+                    f"(content-type {resp.headers.get('content-type', 'unknown')})"
+                )
+            raise FetchError(f"feed {url} has no entries")
+
         items = []
 
-        for entry in feed.entries:
+        for entry in _newest_entries(feed.entries, settings.RSS_MAX_ENTRIES):
             raw_url = entry.get("link", "")
             canonical = self._canonicalize_url(raw_url)
 
@@ -66,3 +78,13 @@ class RSSFetcher(BaseFetcher):
             ))
 
         return items
+
+
+def _newest_entries(entries, limit: int):
+    """The ``limit`` most recent entries; undated ones keep their feed order after dated ones."""
+    dated = [e for e in entries if e.get("published_parsed") or e.get("updated_parsed")]
+    if not dated:
+        return list(entries)[:limit]
+    undated = [e for e in entries if not (e.get("published_parsed") or e.get("updated_parsed"))]
+    dated.sort(key=lambda e: tuple(e.get("published_parsed") or e.get("updated_parsed")), reverse=True)
+    return (dated + undated)[:limit]
