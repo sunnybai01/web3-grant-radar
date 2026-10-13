@@ -43,7 +43,7 @@ export function ScanControl() {
     }
     const added = summarizeManualScan(scan.data ?? null).new;
     toast.success(copy.scan.finished(added), {
-      action: { label: copy.scan.review, onClick: () => router.push("/") },
+      action: { label: copy.scan.review, onClick: () => router.push("/triage") },
     });
   }, [status, scan.data, queryClient, router]);
 

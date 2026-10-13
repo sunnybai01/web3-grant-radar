@@ -223,4 +223,160 @@ export const copy = {
       },
     },
   },
+
+  landing: {
+    nav: { how: "How it works", console: "The console", open: "Open the radar" },
+
+    hero: {
+      title: "Which Web3 grants are worth chasing this week?",
+      highlight: "worth chasing",
+      lede:
+        "Grant Radar reads ecosystem blogs, project sites, search results and X twice a day. Every candidate is deduplicated, classified, verified and scored before it reaches Slack and the team's triage board.",
+      cta: "Open the radar",
+    },
+
+    /** The hero diagram: one illustrative opportunity on its way through. */
+    flow: {
+      sourcesLabel: "sources",
+      sources: ["rss", "web", "tavily", "x", "listings"],
+      pipelineLabel: "radar pipeline",
+      stages: ["dedup", "classify", "verify", "score"],
+      card: {
+        type: "Grant",
+        title: "Stellar Community Fund",
+        chain: "stellar",
+        reward: "up to $150K",
+        deadline: "closes in 12d",
+        verified: "Verified",
+        score: "8.4",
+      },
+      verdict: "shortlist",
+      verdictNote: "the team decides in the console",
+      delivered: "✓ posted to Slack",
+    },
+
+    sources: ["Ecosystem RSS", "Project websites", "Tavily search", "X / Twitter", "ETHGlobal", "Superteam Earn", "Devpost"],
+
+    how: {
+      label: "How it works",
+      title: "From a noisy feed to a short list.",
+      description:
+        "Four stages run on every scan: twice a day at 09:00 and 21:00 (Asia/Shanghai), or whenever someone presses Run scan.",
+      stages: [
+        {
+          num: "01",
+          title: "Discover",
+          description:
+            "RSS feeds, project sites, Tavily search, X and the structured listings of ETHGlobal, Superteam Earn and Devpost are fetched in parallel.",
+          sample: [
+            { text: "fetch ", tone: "key" },
+            { text: "rss · web · tavily · x · listings", tone: "value" },
+          ],
+        },
+        {
+          num: "02",
+          title: "Deduplicate",
+          description:
+            "Canonical URLs drop exact repeats. Semantic embeddings catch the same programme announced in five places and raise its heat instead.",
+          sample: [
+            { text: "L1 ", tone: "key" },
+            { text: "url", tone: "value" },
+            { text: " · L2 ", tone: "key" },
+            { text: "semantic → heat ×5", tone: "value" },
+          ],
+        },
+        {
+          num: "03",
+          title: "Classify & verify",
+          description:
+            "An LLM separates grants and hackathons from noise. Zero-trust checks anchor the origin, re-fetch the apply page and screen it for phishing.",
+          sample: [
+            { text: "origin ", tone: "key" },
+            { text: "✓", tone: "verdict" },
+            { text: " reachable ", tone: "key" },
+            { text: "✓", tone: "verdict" },
+            { text: " phishing ", tone: "key" },
+            { text: "clear", tone: "verdict" },
+          ],
+        },
+        {
+          num: "04",
+          title: "Score & deliver",
+          description:
+            "ROI, reputation, timeliness and strategic fit add up to one score. New opportunities go to Slack and onto the triage board.",
+          sample: [
+            { text: "roi ", tone: "key" },
+            { text: "9.0", tone: "value" },
+            { text: " · fit ", tone: "key" },
+            { text: "7.5", tone: "value" },
+            { text: " · score ", tone: "key" },
+            { text: "8.4", tone: "verdict" },
+          ],
+        },
+      ],
+    },
+
+    console: {
+      label: "The console",
+      title: "Triage together, in one place.",
+      description:
+        "Each opportunity is New, Shortlisted or Dismissed, and the decision is shared by the whole team. The view lives in the URL, so a link opens exactly what you saw.",
+      features: [
+        {
+          title: "Keyboard triage",
+          description:
+            "Move with J and K, shortlist with S, dismiss with D, undo with Z. Opportunities past their deadline leave the list on their own.",
+          keys: ["J", "K", "S", "D", "Z"],
+        },
+        {
+          title: "Verification on demand",
+          description:
+            "Trust score, key evidence, open questions, similar past events and the ways to take part, for any opportunity, when you ask for it.",
+          sample: [
+            { text: "confidence ", tone: "key" },
+            { text: "high", tone: "verdict" },
+            { text: " · evidence ", tone: "key" },
+            { text: "4", tone: "value" },
+            { text: " · unknowns ", tone: "key" },
+            { text: "1", tone: "value" },
+          ],
+        },
+        {
+          title: "Ask Copilot",
+          description:
+            "A read-only assistant that answers from the database: is this worth our week, how does it compare, what should we build for it.",
+          sample: [{ text: "“How does this compare with the other Stellar grants?”", tone: "value" }],
+        },
+      ],
+    },
+
+    closing: {
+      label: "Ready to triage?",
+      title: "Today's opportunities are scored and waiting.",
+      primary: "Open the radar",
+      secondary: "Pipeline health",
+    },
+
+    footer: {
+      blurb: "Daily triage of Web3 grants and hackathons — deduplicated, verified and scored.",
+      columns: [
+        {
+          title: "Overview",
+          links: [
+            { label: "How it works", href: "#how" },
+            { label: "The console", href: "#console" },
+          ],
+        },
+        {
+          title: "Console",
+          links: [
+            { label: "Triage", href: "/triage" },
+            { label: "Operations", href: "/operations" },
+          ],
+        },
+      ],
+      schedule: "Scans daily at 09:00 and 21:00 · Asia/Shanghai",
+      copyright: "© 2026 Web3 Grant Radar",
+    },
+  },
 } as const;

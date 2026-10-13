@@ -24,6 +24,7 @@
   --color-surface-alt: #f6f7fb;
   --color-surface-hover: #f1f3f9;
   --color-surface-track: #eef0f6;
+  --color-surface-hero: #f8fafc;
 
   --color-line: #e5e7eb;
   --color-line-strong: #d7dae1;
@@ -33,6 +34,11 @@
   --color-yellow-soft: #fbecb4;
   --color-yellow-pale: #fdf6dd;
   --color-yellow-deep: #a77d0e;
+  --color-yellow-bright: #f5c134;
+
+  /* Text and rules on ink (the landing page's closing band). */
+  --color-dark-line: #2a3448;
+  --color-dark-dim: #98a2b3;
 
   --color-success: #14783f;
   --color-success-surface: #f4fbf6;
@@ -54,6 +60,16 @@
   --animate-arrow-slide: arrow-slide 0.4s ease;
   --animate-shimmer: shimmer 1.4s ease-in-out infinite;
 
+  /* Landing page. */
+  --animate-caret: caret 1.1s step-end infinite;
+  --animate-gradient-pan: gradient-pan 6s linear infinite;
+  --animate-flow-x: flow-x 1.5s linear infinite;
+  --animate-flow-y: flow-y 1.5s linear infinite;
+  --animate-flow-path: flow-path 1.5s linear infinite;
+  --animate-radar-sweep: radar-sweep 8s linear infinite;
+  --animate-radar-blip: radar-blip 8s ease-out infinite;
+  --animate-rise-in: rise-in 0.6s ease-out both;
+
   @keyframes arrow-slide {
     0% { transform: translateX(0); opacity: 1; }
     45% { transform: translateX(10px); opacity: 0; }
@@ -64,6 +80,49 @@
   @keyframes shimmer {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.45; }
+  }
+
+  @keyframes caret {
+    0%, 49% { opacity: 1; }
+    50%, 100% { opacity: 0; }
+  }
+
+  @keyframes gradient-pan {
+    0% { background-position: 0% 50%; }
+    100% { background-position: 200% 50%; }
+  }
+
+  @keyframes flow-x {
+    0% { transform: translateX(0); opacity: 0; }
+    15%, 80% { opacity: 1; }
+    100% { transform: translateX(26px); opacity: 0; }
+  }
+
+  @keyframes flow-y {
+    0% { transform: translateY(0); opacity: 0; }
+    15%, 80% { opacity: 1; }
+    100% { transform: translateY(13px); opacity: 0; }
+  }
+
+  @keyframes flow-path {
+    0% { offset-distance: 0%; opacity: 0; }
+    15%, 80% { opacity: 1; }
+    100% { offset-distance: 100%; opacity: 0; }
+  }
+
+  /* FadeUp's entrance without waiting for JS, for content that is in view on load. */
+  @keyframes rise-in {
+    from { opacity: 0; transform: translateY(24px); }
+  }
+
+  @keyframes radar-sweep {
+    to { transform: rotate(1turn); }
+  }
+
+  /* A blip flares as the sweep passes it, then fades for the rest of the turn. */
+  @keyframes radar-blip {
+    0% { opacity: 1; transform: scale(1.6); }
+    35%, 100% { opacity: 0.25; transform: scale(1); }
   }
 }
 
@@ -103,6 +162,36 @@
       transition-duration: 0.01ms !important;
     }
   }
+}
+
+@layer components {
+  .fade-up {
+    opacity: 0;
+    transform: translateY(24px);
+    transition:
+      opacity 0.6s ease-out,
+      transform 0.6s ease-out;
+  }
+
+  .fade-up[data-visible="true"] {
+    opacity: 1;
+    transform: none;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .fade-up {
+      opacity: 1;
+      transform: none;
+    }
+  }
+}
+
+/* The hero headline's highlighted words. */
+@utility text-spectrum {
+  background-image: linear-gradient(90deg, #d97706, #ea580c, #db2777, #7c3aed, #db2777, #ea580c, #d97706);
+  background-size: 200% auto;
+  background-clip: text;
+  color: transparent;
 }
 
 /* ---------------------------------------------------------------------------
