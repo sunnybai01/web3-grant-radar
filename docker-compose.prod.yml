@@ -57,7 +57,8 @@ services:
       CHAT_API_INTERNAL_KEY: ${CHAT_API_INTERNAL_KEY:?set CHAT_API_INTERNAL_KEY in .env}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com/v1}
-      CHAT_AGENT_MODEL: ${CHAT_AGENT_MODEL:-deepseek-chat}
+      CHAT_AGENT_MODEL: ${CHAT_AGENT_MODEL:-deepseek-flash}
+      DEEPSEEK_THINKING: ${DEEPSEEK_THINKING:-true}
       COPILOTKIT_TELEMETRY_DISABLED: "true"
     depends_on:
       chat-api:

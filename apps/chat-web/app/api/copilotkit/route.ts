@@ -8,6 +8,8 @@ import {
 import { createOpenAI } from "@ai-sdk/openai";
 import { stepCountIs, streamText } from "ai";
 
+import { DEFAULT_DEEPSEEK_MODEL, isThinkingEnabled, withThinking } from "@/lib/deepseek";
+
 function resolveDeepseekBaseUrl(raw?: string) {
   const fallback = "https://api.deepseek.com/v1";
   if (!raw) {
@@ -28,12 +30,13 @@ function resolveDeepseekBaseUrl(raw?: string) {
 
 const deepseekBaseUrl = resolveDeepseekBaseUrl(process.env.DEEPSEEK_BASE_URL);
 const deepseekApiKey = process.env.DEEPSEEK_API_KEY || "";
-const deepseekModel = process.env.CHAT_AGENT_MODEL || "deepseek-chat";
+const deepseekModel = process.env.CHAT_AGENT_MODEL || DEFAULT_DEEPSEEK_MODEL;
 
 const deepseekProvider = createOpenAI({
   baseURL: deepseekBaseUrl,
   apiKey: deepseekApiKey,
   name: "deepseek",
+  fetch: withThinking(isThinkingEnabled(process.env.DEEPSEEK_THINKING)),
 });
 
 const systemPrompt =
