@@ -1,5 +1,6 @@
 import { cva, type VariantProps } from "class-variance-authority";
 import { Loader2 } from "lucide-react";
+import Link from "next/link";
 import * as React from "react";
 
 import { cn } from "@/lib/utils";
@@ -20,8 +21,12 @@ export const buttonVariants = cva(
           "border-[1.5px] border-danger bg-surface text-danger hover:bg-danger-badge",
         ghost: "text-ink-body hover:bg-surface-hover hover:text-ink",
         link: "rounded-sm px-0 text-ink underline decoration-ink/25 underline-offset-[3px] hover:decoration-ink",
+        // On ink backgrounds.
+        accent: "bg-yellow text-ink hover:bg-yellow-bright",
+        ghostDark: "border-[1.5px] border-yellow text-yellow hover:bg-ink-hover hover:text-yellow-bright",
       },
       size: {
+        lg: "min-h-11 px-[22px] text-[0.9rem]",
         md: "min-h-10 px-[18px] text-[0.8125rem]",
         sm: "min-h-8 px-3.5 text-xs",
         icon: "size-8 text-ink-body",
@@ -45,8 +50,10 @@ const pillIconVariants = cva(
         danger: "bg-danger-badge text-danger",
         ghost: "bg-surface-track",
         link: "hidden",
+        accent: "bg-ink text-yellow",
+        ghostDark: "bg-yellow",
       },
-      size: { md: "size-7 text-sm", sm: "size-6 text-xs", icon: "hidden" },
+      size: { lg: "size-8 text-[0.9rem]", md: "size-7 text-sm", sm: "size-6 text-xs", icon: "hidden" },
     },
     defaultVariants: { variant: "primary", size: "md" },
   }
@@ -105,3 +112,34 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(function 
     </button>
   );
 });
+
+/** A navigation link drawn as a pill button, with the same pill icon. */
+export function ButtonLink({
+  href,
+  variant = "primary",
+  size = "md",
+  pillIcon,
+  className,
+  children,
+}: {
+  href: string;
+  pillIcon?: React.ReactNode | null;
+  className?: string;
+  children: React.ReactNode;
+} & VariantProps<typeof buttonVariants>) {
+  const showsPill = pillIcon !== null && size !== "icon" && variant !== "link" && variant !== "ghost";
+
+  return (
+    <Link
+      href={href}
+      className={cn(buttonVariants({ variant, size }), showsPill && (size === "sm" ? "pr-1" : "pr-1.5"), className)}
+    >
+      {children}
+      {showsPill ? (
+        <span aria-hidden className={pillIconVariants({ variant, size })}>
+          <span className="group-hover:animate-arrow-slide">{pillIcon ?? "→"}</span>
+        </span>
+      ) : null}
+    </Link>
+  );
+}

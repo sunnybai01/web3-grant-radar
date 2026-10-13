@@ -1,12 +1,5 @@
-import { Suspense } from "react";
-
-import { TriagePage } from "../features/triage/triage-page";
+import { LandingPage } from "../features/landing/landing-page";
 
 export default function Page() {
-  // useSearchParams (triage view in the URL) needs a Suspense boundary.
-  return (
-    <Suspense>
-      <TriagePage />
-    </Suspense>
-  );
+  return <LandingPage />;
 }

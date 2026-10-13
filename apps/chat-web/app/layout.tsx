@@ -2,8 +2,6 @@ import type { Metadata } from "next";
 import { Inter, JetBrains_Mono } from "next/font/google";
 import type { ReactNode } from "react";
 
-import { TopNav } from "../components/shell/top-nav";
-import { Providers } from "./providers";
 import "./globals.css";
 
 // next/font downloads the files at build time and serves them from this app:
@@ -24,12 +22,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en" className={`${inter.variable} ${jetbrainsMono.variable}`}>
-      <body>
-        <Providers>
-          <TopNav />
-          {children}
-        </Providers>
-      </body>
+      <body>{children}</body>
     </html>
   );
 }
