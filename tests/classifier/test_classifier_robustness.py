@@ -146,3 +146,10 @@ def test_classification_supports_tuple_unpacking() -> None:
 
     assert category == "GRANT"
     assert data == {"title": "X"}
+
+
+def test_ecosystem_is_stored_under_its_canonical_name() -> None:
+    """'bnb', 'bnb chain' and 'binance' coexisted, so filters and the L2 veto split one chain in three."""
+    cls = _classifier(response={"category": "GRANT", "title": "X", "ecosystem": "BNB Chain"})
+
+    assert cls.classify(_item()).data["ecosystem"] == "bnb"

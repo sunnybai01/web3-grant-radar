@@ -31,10 +31,6 @@ class FakeVectorStore:
         pass
 
 
-class NullSummary:
-    def get_embedding_text(self, title, description):
-        return f"{title} {description}".strip()
-
 
 def _db_session():
     engine = create_engine("sqlite:///:memory:")
@@ -52,7 +48,7 @@ def _grant(title: str) -> dict:
 
 
 def _process(db, store, title, url, source_type="superteam_grants", source_name="superteam_grants"):
-    return ContentDeduplicator(store, llm_extractor=NullSummary()).check_and_process(
+    return ContentDeduplicator(store).check_and_process(
         db, _grant(title), source_type=source_type, source_name=source_name, source_url=url,
     )
 

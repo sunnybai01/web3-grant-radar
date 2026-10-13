@@ -136,3 +136,18 @@ def test_unreachable_index_degrades_without_raising() -> None:
         assert summary["indexed"] == 0
     finally:
         db.close()
+
+
+def test_rebuild_reembeds_events_that_are_already_indexed() -> None:
+    """Vectors written from LLM summaries must be rewritten as title + description."""
+    db = _db_session()
+    try:
+        event = _event(db, "Starknet Seed Grants", description="Up to $25K.")
+        store = FakeVectorStore(indexed_ids={f"event_{event.id}"})
+
+        summary = reconcile_vector_index(db, store, rebuild=True)
+
+        assert summary["indexed"] == 1
+        assert store.added[0][:2] == (f"event_{event.id}", "Starknet Seed Grants Up to $25K.")
+    finally:
+        db.close()

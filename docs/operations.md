@@ -153,6 +153,18 @@ docker compose run --rm pipeline python -m scripts.migrate_raw_signals_processin
 docker compose exec -T postgres psql -U web3agent -d web3agent -c "select id, source_name, attempts, left(last_error, 80) from raw_signals where status = 'failed' order by fetched_at desc limit 20;"
 ```
 
+去重索引维护：把已有事件的生态字段归一（`bnb chain`、`binance` → `bnb`），并用当前的向量文本（标题 + 描述）重建全部事件的向量。改过向量文本或生态映射之后执行一次，可以重复执行；先加 `--dry-run` 看会改什么：
+
+```bash
+docker compose run --rm pipeline python -m scripts.rebuild_dedup_index --dry-run
+```
+
+合并历史重复事件：按当前去重规则（同一条推文 / feed 条目 / 搜索结果 / 平台列表链接，或忽略通用词后标题相同且截止日期和链不冲突）找出重复组。每组保留团队处理过的那条（shortlisted 优先于 dismissed），否则保留来源最多的；来源、推送记录和缺失字段并入保留的那条，其余删除。默认只列出计划，加 `--apply` 才写入：
+
+```bash
+docker compose run --rm pipeline python -m scripts.merge_duplicate_events
+```
+
 其他数据迁移和清理脚本见 `scripts/`，各脚本顶部的 docstring 写明了用法。
 
 ## 5. 信息源健康度

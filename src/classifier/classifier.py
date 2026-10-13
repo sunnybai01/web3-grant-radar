@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Optional, Dict, Any, Tuple
 
 from src.fetchers.base import FetchedItem
+from .ecosystem import normalize_ecosystem
 from .keyword_filter import KeywordFilter
 from .llm_gateway import LLMGateway
 from .prompts import CLASSIFY_SYSTEM, CLASSIFY_USER_TEMPLATE, current_date_label
@@ -166,6 +167,7 @@ class OpportunityClassifier:
         metadata = item.metadata or {}
         if not result.get("ecosystem"):
             result["ecosystem"] = metadata.get("ecosystem")
+        result["ecosystem"] = normalize_ecosystem(result.get("ecosystem"))
 
         result["category"] = category
         result["confidence"] = confidence
