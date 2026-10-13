@@ -54,7 +54,7 @@ The system separates scheduled opportunity discovery from dashboard/API traffic.
 | `postgres` | `grant_radar_postgres` | Events, raw signals, source health, and run logs |
 | `chromadb` | `grant_radar_chromadb` | Vector index for L2 semantic deduplication, listening on `127.0.0.1:8001` |
 
-The Next.js frontend (`apps/chat-web`) runs outside Docker. Start it locally with `pnpm dev` or deploy it to Vercel.
+In local development the Next.js frontend (`apps/chat-web`) runs outside Docker: start it with `pnpm dev`. In production `docker-compose.prod.yml` adds it as a `web` container behind Caddy (HTTPS) on a single EC2 host; see [docs/deploy-aws.md](docs/deploy-aws.md).
 
 ## Opportunity pipeline
 

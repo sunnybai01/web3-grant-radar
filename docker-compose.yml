@@ -11,10 +11,20 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      # Manual scans from the dashboard run the whole pipeline inside this
+      # process, so it needs the vector store as much as `pipeline` does.
+      chromadb:
+        condition: service_started
     restart: unless-stopped
     command: uvicorn src.chat_api.app:app --host 0.0.0.0 --port 8000
     ports:
       - "127.0.0.1:8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/chat/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
   pipeline:
     build: .
@@ -49,7 +59,8 @@ services:
       retries: 5
 
   chromadb:
-    image: chromadb/chroma:latest
+    # Keep in step with the chromadb client pinned in constraints.runtime.txt.
+    image: chromadb/chroma:1.5.9
     container_name: grant_radar_chromadb
     ports:
       - "127.0.0.1:8001:8000"

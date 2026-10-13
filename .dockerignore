@@ -27,3 +27,13 @@ reports/
 # Local env files
 .env
 apps/chat-web/.env
+
+# Data and credentials that must never be baked into an image
+backups/
+chroma_data/
+.twitter-cookies.json
+
+# Not used by the Python image; the dashboard has its own build context
+apps/
+.claude/
+.superpowers/

@@ -54,7 +54,7 @@ Web3 Grant Radar 持续监控各生态公告源、项目官网、Tavily 搜索�
 | `postgres` | `grant_radar_postgres` | 保存事件、原始信号、信息源健康度和运行日志 |
 | `chromadb` | `grant_radar_chromadb` | L2 语义去重的向量索引，监听 `127.0.0.1:8001` |
 
-Next.js 前端（`apps/chat-web`）不在 Docker 中运行，可以在本地通过 `pnpm dev` 启动，也可以部署到 Vercel。
+本地开发时，Next.js 前端（`apps/chat-web`）不在 Docker 中运行，通过 `pnpm dev` 启动。生产环境由 `docker-compose.prod.yml` 把它作为 `web` 容器，和 Caddy（HTTPS）一起部署在一台 EC2 上，见 [docs/deploy-aws.md](docs/deploy-aws.md)。
 
 ## 机会处理流程
 

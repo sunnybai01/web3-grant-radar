@@ -1,0 +1,17 @@
+# Public entry point for the production stack (docker-compose.prod.yml).
+# Caddy obtains and renews the Let's Encrypt certificate for SITE_DOMAIN by
+# itself; port 80 must stay reachable from the internet for that, while the
+# security group limits 443 to company IPs.
+
+{$SITE_DOMAIN} {
+	encode zstd gzip
+
+	# The dashboard has no login of its own. If 443 cannot be limited to
+	# company IPs, uncomment this and open 443 instead. Generate the hash with
+	#   docker run --rm -it caddy:2.11.7-alpine caddy hash-password
+	# basic_auth {
+	# 	team <bcrypt-hash>
+	# }
+
+	reverse_proxy web:3000
+}
