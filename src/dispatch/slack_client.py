@@ -1,5 +1,6 @@
 """Slack dispatch — Block Kit cards, Thread silent append, status updates."""
 import logging
+import re
 from pathlib import Path
 from typing import Optional, Dict, Any
 
@@ -11,6 +12,23 @@ from config.settings import settings
 from src.classifier.scorer import stars_from_score
 
 logger = logging.getLogger(__name__)
+
+
+# A ticker other than USD ("OP", "APT", "USDC") means part of the amount is not in dollars.
+_NON_USD_TICKER_RE = re.compile(r"\b(?!USD\b)[A-Z]{2,6}\b")
+
+
+def _plain_dollars(amount: str) -> bool:
+    text = amount.strip()
+    return "≈" in text or (text.startswith("$") and not _NON_USD_TICKER_RE.search(text))
+
+
+def _usd_short(value: float) -> str:
+    """$3.9M, $415K, $800 — an estimate, so two significant figures are plenty."""
+    for divisor, suffix in ((1e9, "B"), (1e6, "M"), (1e3, "K")):
+        if value >= divisor:
+            return f"${value / divisor:.2g}{suffix}" if value / divisor < 10 else f"${value / divisor:.0f}{suffix}"
+    return f"${value:.0f}"
 
 
 def _retry_handlers() -> list:
@@ -215,7 +233,10 @@ class SlackDispatcher:
 
         title = event.get("title", "Untitled Opportunity")
         amount = event.get("amount") or "Not specified"
-        deadline = event.get("deadline") or "Rolling / Not specified"
+        amount_usd = event.get("amount_usd")
+        if amount_usd and not _plain_dollars(str(amount)):
+            amount = f"{amount} (≈ {_usd_short(amount_usd)})"
+        deadline = event.get("deadline") or ("Rolling" if event.get("is_rolling") else "Not stated")
         if hasattr(deadline, "strftime"):
             deadline = deadline.strftime("%Y-%m-%d")
         ecosystem = (event.get("ecosystem") or "Unknown").upper()

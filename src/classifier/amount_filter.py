@@ -18,6 +18,7 @@ _CURRENCIES = (
     "pyusd", "fdusd", "tusd", "usdc", "usdt", "usdg", "usde", "usds", "usd", "us$", "eur", "gbp", "cny", "rmb", "jpy",
     "weth", "eth", "wbtc", "btc", "sol", "bnb", "matic", "avax", "near",
     "atom", "dot", "sui", "apt", "arb", "dai",
+    "strk", "op", "pol", "xlm", "ton",
 )
 
 # Rough USD rates — only ever used to decide which side of the floor an amount
@@ -34,6 +35,7 @@ _USD_RATES = {
     "eth": 3000.0, "weth": 3000.0, "btc": 60000.0, "wbtc": 60000.0,
     "sol": 150.0, "bnb": 600.0, "matic": 0.5, "avax": 30.0, "near": 5.0,
     "atom": 8.0, "dot": 6.0, "sui": 3.0, "apt": 8.0, "arb": 1.0,
+    "op": 1.0, "strk": 0.5, "pol": 0.5, "xlm": 0.4, "ton": 5.0,
 }
 
 _MULTIPLIERS = {
@@ -57,10 +59,12 @@ _TOKEN_RE = re.compile(
     re.IGNORECASE,
 )
 
-# A number trailed by a word we don't recognise as a currency — "500000 FOO",
-# "2000 points". Treated as an unreadable amount rather than as bare USD.
+# A number, optionally scaled ("200M"), trailed by a word we don't recognise as a
+# currency — "500000 FOO", "2000 points", "200,000,000 S" (Sonic). Treated as an
+# unreadable amount rather than as bare USD: read as dollars, Sonic's grant topped
+# the reward sort at $200M.
 _UNKNOWN_UNIT_RE = re.compile(
-    rf"\d\s*(?!(?:{_CUR_ALT}|{_MULT_ALT})(?![a-z]))[a-z]{{2,10}}(?![a-z])",
+    rf"\d\s*(?:(?:{_MULT_ALT})\s+)?(?!(?:{_CUR_ALT}|{_MULT_ALT})(?![a-z]))[a-z]{{1,10}}(?![a-z])",
     re.IGNORECASE,
 )
 

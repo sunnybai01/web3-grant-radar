@@ -61,7 +61,9 @@ DEADLINE_VETO_TOLERANCE = timedelta(days=6)
 MATCH_WINDOW_SLACK_DAYS = 7
 
 # Event fields a merge may fill in when the stored Event has none.
-BACKFILL_FIELDS = ("deadline", "start_date", "amount", "application_url", "track", "ecosystem")
+BACKFILL_FIELDS = (
+    "deadline", "start_date", "amount", "amount_usd", "is_rolling", "application_url", "track", "ecosystem",
+)
 _DATETIME_FIELDS = {"deadline", "start_date"}
 
 _TITLE_NOISE_RE = re.compile(r"[^0-9a-z\u4e00-\u9fff]+")

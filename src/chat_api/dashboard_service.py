@@ -1,5 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
+from src.deadlines import deadline_end
+
 
 def _source_trust_from_event(event) -> str:
     log = event.verification_log or {}
@@ -15,7 +17,7 @@ def _verification_verdict_from_event(event) -> str:
 
 
 TRIAGE_STATUSES = ("new", "shortlisted", "dismissed")
-SORT_KEYS = ("score", "deadline", "newest")
+SORT_KEYS = ("score", "deadline", "newest", "reward")
 CLOSING_SOON_DAYS = 7
 SUMMARY_CHARS = 280
 # The listing loads every grant/hackathon row and filters in Python: the table
@@ -53,7 +55,10 @@ def _summary(text: str | None) -> str:
 
 def _is_closing_soon(event, now: datetime) -> bool:
     deadline = _as_utc(event.deadline)
-    return deadline is not None and now <= deadline <= now + timedelta(days=CLOSING_SOON_DAYS)
+    if deadline is None:
+        return False
+    # A date-only deadline lasts through that whole day (src.deadlines).
+    return now <= deadline_end(deadline) and deadline <= now + timedelta(days=CLOSING_SOON_DAYS)
 
 
 def serialize_opportunity(event, source_count: int = 0) -> dict:
@@ -71,14 +76,20 @@ def serialize_opportunity(event, source_count: int = 0) -> dict:
         "summary": _summary(event.description),
         "ecosystem": event.ecosystem or None,
         "amount": event.amount or None,
+        "amount_usd": getattr(event, "amount_usd", None),
         "deadline": _iso(event.deadline),
+        # With no deadline: rolling when the content said so, otherwise not stated.
+        "rolling": bool(getattr(event, "is_rolling", None)),
         "first_seen": _iso(event.created_at),
         "heat": event.heat_count or 1,
         "source_count": source_count,
         "verified": bool(event.is_verified),
         "verification_verdict": _verification_verdict_from_event(event),
         "source_trust": _source_trust_from_event(event),
-        "apply_url": event.application_url or event.source_url or "",
+        # The apply link only; the page the item was found on is source_url. Falling
+        # back to the source made 51 of 70 "apply" buttons open a tweet or an article.
+        "apply_url": event.application_url or "",
+        "source_url": event.source_url or "",
         "triage_status": _triage_status(event),
     }
 
@@ -117,6 +128,13 @@ def _sort_events(events: list, sort: str) -> list:
         return sorted(events, key=lambda e: (_as_utc(e.deadline) or far_future, -e.id))
     if sort == "newest":
         return sorted(events, key=lambda e: (_as_utc(e.created_at) or epoch, e.id), reverse=True)
+    if sort == "reward":
+        # Largest known USD amount first; unknown amounts go last.
+        return sorted(
+            events,
+            key=lambda e: (getattr(e, "amount_usd", None) is not None, getattr(e, "amount_usd", None) or 0, e.id),
+            reverse=True,
+        )
     # Score: unscored items go last.
     return sorted(
         events,

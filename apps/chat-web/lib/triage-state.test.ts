@@ -51,3 +51,8 @@ describe("selection", () => {
     expect(stepSelection([], null, 1)).toBeNull();
   });
 });
+
+
+it("keeps the reward sort in the URL", () => {
+  expect(parseTriageView(new URLSearchParams("sort=reward")).filters.sort).toBe("reward");
+});

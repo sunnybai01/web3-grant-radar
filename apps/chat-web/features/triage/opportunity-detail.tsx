@@ -49,7 +49,7 @@ export function OpportunityDetail({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const detail = useOpportunity(item.id);
-  const deadline = describeDeadline(item.deadline);
+  const deadline = describeDeadline(item.deadline, undefined, { rolling: item.rolling });
   const official = item.source_trust === "official";
 
   return (
@@ -72,11 +72,15 @@ export function OpportunityDetail({
 
       <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
         <ValueStrip label={copy.detail.facts.amount} wrap>
-          {formatAmount(item.amount)}
+          {formatAmount(item.amount, item.amount_usd)}
         </ValueStrip>
         <ValueStrip
           label={copy.detail.facts.deadline}
-          valueClassName={cn(deadline.state === "urgent" && "text-danger", deadline.state === "closed" && "text-ink-mute line-through")}
+          valueClassName={cn(
+            deadline.state === "urgent" && "text-danger",
+            deadline.state === "closed" && "text-ink-mute line-through",
+            deadline.state === "unknown" && "text-ink-mute"
+          )}
         >
           <span title={deadline.exact ?? undefined}>
             {deadline.exact ? `${deadline.exact} · ${deadline.label.replace("closes in ", "")}` : deadline.label}
@@ -115,6 +119,16 @@ export function OpportunityDetail({
             <span aria-hidden className="inline-flex size-7 items-center justify-center rounded-full bg-yellow text-sm text-ink">
               ↗
             </span>
+          </a>
+        ) : null}
+        {item.source_url ? (
+          <a
+            href={item.source_url}
+            target="_blank"
+            rel="noreferrer"
+            className={buttonVariants({ variant: "link" })}
+          >
+            {copy.detail.actions.openSource} ↗
           </a>
         ) : null}
         {item.triage_status === "dismissed" ? (

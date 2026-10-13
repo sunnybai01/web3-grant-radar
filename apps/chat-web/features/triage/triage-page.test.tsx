@@ -131,3 +131,26 @@ it("says the list is done and when the next scan runs", async () => {
   expect(await screen.findByText("You're all caught up.")).toBeTruthy();
   expect(screen.getByText(/^Next scheduled scan at \d{2}:\d{2}\.$/)).toBeTruthy();
 });
+
+
+it("offers the apply page and the source separately", async () => {
+  // Falling back to the source made 51 of 70 "apply" buttons open a tweet or an article.
+  const withApply = makeItem(1, { title: "Base Builder Grants", apply_url: "https://base.org/apply", source_url: "https://x.com/base/status/1" });
+  const sourceOnly = makeItem(2, { title: "Sui Overflow", apply_url: "", source_url: "https://news.example/sui" });
+  mocked.listOpportunities.mockImplementation(async () => makeListing([withApply, sourceOnly]));
+  mocked.getOpportunity.mockImplementation(async (id: number) => ({
+    ...(id === 1 ? withApply : sourceOnly), description: "", sources: [],
+  }));
+  renderPage();
+
+  await waitFor(() => expect(selectedTitle()).toBe("Base Builder Grants"));
+  const detail = screen.getByRole("article");
+  expect(within(detail).getByRole("link", { name: /apply page/i }).getAttribute("href")).toBe("https://base.org/apply");
+  expect(within(detail).getByRole("link", { name: /source/i }).getAttribute("href")).toBe("https://x.com/base/status/1");
+
+  press("j");
+  await waitFor(() => expect(selectedTitle()).toBe("Sui Overflow"));
+  const next = screen.getByRole("article");
+  expect(within(next).queryByRole("link", { name: /apply page/i })).toBeNull();
+  expect(within(next).getByRole("link", { name: /source/i }).getAttribute("href")).toBe("https://news.example/sui");
+});

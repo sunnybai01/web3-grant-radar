@@ -24,6 +24,8 @@ from src.classifier.llm_gateway import LLMGateway
 from src.classifier.classifier import Classification, OpportunityClassifier
 from src.classifier.prompts import current_date_label
 from src.classifier.scorer import OpportunityScorer
+from src.deadlines import deadline_passed
+from src.fetchers.links import expand_short_link
 from src.verifier.verifier import verify_opportunity
 from src.dispatch.slack_client import SlackDispatcher
 from src.dispatch.daily_summary_service import build_daily_summary
@@ -44,6 +46,7 @@ from src.db.queries import (
     mark_daily_summary_failed,
     unlock_tavily_cooldown,
     mark_raw_signal_processed,
+    expire_past_deadline_events,
 )
 
 logging.basicConfig(
@@ -74,6 +77,8 @@ EVENT_MODEL_FIELDS = {
     "start_date",
     "deadline",
     "amount",
+    "amount_usd",
+    "is_rolling",
     "track",
     "ecosystem",
     "application_url",
@@ -276,9 +281,10 @@ def _staleness_reason(
     structured = structured or {}
     tier = (source_tier or "discovery").lower()
 
-    # If we have a deadline and it's in the past → definitely expired
+    # If we have a deadline and it's in the past → definitely expired. A date-only
+    # deadline lasts through that whole day (see src.deadlines).
     deadline = _parse_datetime(structured.get("deadline"))
-    if deadline is not None and deadline < now:
+    if deadline_passed(deadline, now=now):
         return "deadline_expired"
 
     # A past year in the title is about as strong as a past deadline ("ETHIndiaVilla
@@ -480,9 +486,11 @@ def _process_item(db, item, signal_id, schedule: str):
         "start_date": structured.get("start_date"),
         "deadline": structured.get("deadline"),
         "amount": structured.get("amount"),
+        "amount_usd": amount_usd,
+        "is_rolling": _is_rolling(structured) if "is_rolling" in structured else None,
         "track": structured.get("track"),
         "ecosystem": structured.get("ecosystem"),
-        "application_url": structured.get("application_url"),
+        "application_url": expand_short_link(structured.get("application_url")),
         "source_url": item.raw_url,
         "source_type": item.source_type,
         "source_platform": structured.get("source_platform") or item.source_name,
@@ -598,7 +606,7 @@ def run_pipeline(schedule: str):
     log = create_schedule_log(db, f"pipeline_{schedule}")
     stats = {"fetched": 0, "new": 0, "deduped": 0, "classified": 0, "noise": 0,
              "unactionable": 0, "low_amount": 0, "stale": 0, "verified": 0,
-             "fraud": 0, "pushed": 0, "llm_errors": 0, "item_errors": 0}
+             "fraud": 0, "pushed": 0, "expired": 0, "llm_errors": 0, "item_errors": 0}
     result = None
 
     try:
@@ -717,6 +725,13 @@ def run_pipeline(schedule: str):
             logger.error(
                 "[%s] %d item(s) failed mid-pipeline and were skipped.", schedule, stats["item_errors"],
             )
+
+        # Past-deadline opportunities leave the dashboard and the daily summary.
+        try:
+            stats["expired"] = expire_past_deadline_events(db)
+        except Exception as e:
+            _rollback(db)
+            logger.exception("[%s] Expiring past-deadline events failed: %s", schedule, e)
 
         finish_schedule_log(db, log.id, items_fetched=stats["fetched"],
                            items_new=stats["new"], items_deduped=stats["deduped"],

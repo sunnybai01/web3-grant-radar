@@ -53,6 +53,11 @@ class Event(Base):
     start_date = Column(DateTime(timezone=True), nullable=True)
     deadline = Column(DateTime(timezone=True), nullable=True, index=True)
     amount = Column(String(256), nullable=True)
+    # Rough USD reading of `amount` (token prices are approximate), for sorting by reward.
+    amount_usd = Column(Float, nullable=True)
+    # True when the content says applications are accepted on a rolling basis, so a
+    # missing deadline means "rolling" rather than "not stated".
+    is_rolling = Column(Boolean, nullable=True)
     track = Column(String(128), nullable=True)
     ecosystem = Column(String(64), nullable=True, index=True)
     application_url = Column(Text, nullable=True)

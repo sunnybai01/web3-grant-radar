@@ -23,6 +23,7 @@ def signal_outcomes(monkeypatch):
         lambda db, signal_id, error=None: recorded.append((signal_id, error)),
         raising=False,
     )
+    monkeypatch.setattr("src.main.expire_past_deadline_events", lambda db, now=None: 0, raising=False)
     return recorded
 
 
@@ -969,3 +970,23 @@ def test_keyword_filter_rejections_are_not_counted_as_llm_noise(monkeypatch, sig
     result = _run_items(monkeypatch, [_feed_item()], classify=lambda item: Classification(category="NOISE"))
 
     assert result["noise"] == 0
+
+
+def test_each_run_expires_opportunities_past_their_deadline(monkeypatch, signal_outcomes) -> None:
+    expired = []
+    monkeypatch.setattr("src.main.expire_past_deadline_events", lambda db, now=None: expired.append(db) or 3)
+
+    result = _run_items(monkeypatch, [_feed_item()], classify=lambda item: Classification(category="NOISE"))
+
+    assert len(expired) == 1
+    assert result["expired"] == 3
+
+
+def test_a_date_only_deadline_is_not_stale_on_its_own_day() -> None:
+    """'2026-10-25' was dropped as deadline_expired from 08:00 Beijing time that day."""
+    now = datetime(2026, 10, 25, 3, 0, tzinfo=timezone.utc)
+
+    assert _staleness_reason(
+        _discovery_item(now), {"title": "Hackathon", "deadline": "2026-10-25"},
+        source_tier="discovery", now=now,
+    ) is None

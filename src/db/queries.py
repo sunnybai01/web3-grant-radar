@@ -165,6 +165,33 @@ def expire_event(db: Session, event_id: int) -> Optional[Event]:
     return update_event(db, event_id, status="expired")
 
 
+def expire_past_deadline_events(db: Session, now: Optional[datetime.datetime] = None) -> int:
+    """Mark live opportunities whose deadline has passed as expired.
+
+    Shortlisted ones are left alone: the team may still be finishing an
+    application, and the decision is theirs.
+    """
+    from src.deadlines import deadline_passed
+
+    now = now or datetime.datetime.now(datetime.timezone.utc)
+    candidates = (
+        db.query(Event)
+        .filter(
+            Event.status.in_(["new", "pushed"]),
+            Event.triage_status != "shortlisted",
+            Event.deadline.isnot(None),
+            Event.deadline < now,
+        )
+        .all()
+    )
+    expired = [e for e in candidates if deadline_passed(e.deadline, now=now)]
+    for event in expired:
+        event.status = "expired"
+    if expired:
+        db.commit()
+    return len(expired)
+
+
 def mark_event_fraud(db: Session, event_id: int, log: dict) -> Optional[Event]:
     return update_event(db, event_id, status="fraud", verification_log=log, is_verified=False)
 

@@ -54,7 +54,7 @@ def dashboard_opportunities(
     ecosystem: str = "",
     source_trust: str = Query(default="all", pattern="^(all|official|discovery)$"),
     q: str = "",
-    sort: str = Query(default="score", pattern="^(score|deadline|newest)$"),
+    sort: str = Query(default="score", pattern="^(score|deadline|newest|reward)$"),
     closing_within_days: int = Query(default=0, ge=0, le=365),
 ) -> DashboardOpportunitiesResponse:
     from . import dashboard_service

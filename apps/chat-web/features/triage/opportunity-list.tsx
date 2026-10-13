@@ -142,6 +142,7 @@ export const OpportunityList = forwardRef<HTMLInputElement, ListProps>(function 
         >
           <option value="score">{copy.triage.filters.score}</option>
           <option value="deadline">{copy.triage.filters.deadline}</option>
+          <option value="reward">{copy.triage.filters.reward}</option>
           <option value="newest">{copy.triage.filters.newest}</option>
         </SelectChip>
       </div>
@@ -202,7 +203,7 @@ export const OpportunityRow = forwardRef<
   HTMLButtonElement,
   { item: DashboardOpportunityItem; selected: boolean; showStatus: boolean; onSelect: () => void }
 >(function OpportunityRow({ item, selected, showStatus, onSelect }, ref) {
-  const deadline = describeDeadline(item.deadline);
+  const deadline = describeDeadline(item.deadline, undefined, { rolling: item.rolling });
   return (
     <button
       ref={ref}
@@ -225,7 +226,7 @@ export const OpportunityRow = forwardRef<
           {" · "}
           {formatType(item.type)}
           {" · "}
-          {formatAmount(item.amount)}
+          {formatAmount(item.amount, item.amount_usd)}
           {" · "}
           <span
             title={deadline.exact ?? undefined}

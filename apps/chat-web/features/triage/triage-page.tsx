@@ -92,7 +92,10 @@ export function TriagePage() {
     shortlist: () => selected && void triage(selected, "shortlisted"),
     dismiss: () => selected && void triage(selected, "dismissed"),
     undo: () => void undo(),
-    open: () => selected?.apply_url && window.open(selected.apply_url, "_blank", "noopener,noreferrer"),
+    open: () => {
+      const url = selected?.apply_url || selected?.source_url;
+      if (url) window.open(url, "_blank", "noopener,noreferrer");
+    },
     search: () => searchRef.current?.focus(),
   });
 

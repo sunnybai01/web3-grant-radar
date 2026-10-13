@@ -153,6 +153,12 @@ docker compose run --rm pipeline python -m scripts.migrate_raw_signals_processin
 docker compose exec -T postgres psql -U web3agent -d web3agent -c "select id, source_name, attempts, left(last_error, 80) from raw_signals where status = 'failed' order by fetched_at desc limit 20;"
 ```
 
+金额与滚动申请字段迁移（给 `events` 表加 `amount_usd` / `is_rolling` 字段，并按已有的 `amount` 回填 `amount_usd`）。**升级到按奖金排序、区分"滚动申请/截止未知"的版本前必须先执行**，步骤同上。脚本可以重复执行：
+
+```bash
+docker compose run --rm pipeline python -m scripts.migrate_events_amount_usd_rolling
+```
+
 去重索引维护：把已有事件的生态字段归一（`bnb chain`、`binance` → `bnb`），并用当前的向量文本（标题 + 描述）重建全部事件的向量。改过向量文本或生态映射之后执行一次，可以重复执行；先加 `--dry-run` 看会改什么：
 
 ```bash

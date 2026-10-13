@@ -118,3 +118,21 @@ def test_zero_means_not_stated(text) -> None:
 )
 def test_usd_stablecoins_are_read_as_dollars(text, expected) -> None:
     assert parse_amount_usd(text) == pytest.approx(expected)
+
+
+@pytest.mark.parametrize("text", ["Up to 200,000,000 S", "200M S"])
+def test_an_unpriced_one_letter_ticker_is_unknown_not_dollars(text) -> None:
+    """Sonic's "up to 200,000,000 S" topped the reward sort as $200M."""
+    assert parse_amount_usd(text) is None
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [("3.89M OP", 3_890_000), ("10,000 OP", 10_000), ("20,000 STRK", 10_000), ("1M XLM", 400_000)],
+)
+def test_ecosystem_tokens_have_rough_rates(text, expected) -> None:
+    assert parse_amount_usd(text) == pytest.approx(expected)
+
+
+def test_a_scale_suffix_alone_is_still_read() -> None:
+    assert parse_amount_usd("10 M") == pytest.approx(10_000_000)
