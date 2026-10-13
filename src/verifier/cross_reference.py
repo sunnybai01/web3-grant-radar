@@ -75,6 +75,10 @@ def verify_github_issue(repo: str, issue_number: int) -> dict:
     }
 
 
+# Statuses some servers return for HEAD while serving the page to GET.
+HEAD_REJECTED_STATUSES = {403, 405, 501}
+
+
 def cross_reference_check(event_type: str, application_url: str,
                           source_url: str, metadata: dict = None) -> dict:
     """Run Layer 2 cross-reference checks.
@@ -90,6 +94,10 @@ def cross_reference_check(event_type: str, application_url: str,
 
     if not application_url and not source_url:
         return result
+
+    # The pipeline passes event types in lowercase ("grant"); compared as-is
+    # against "GRANT"/"HACKATHON" this layer never ran for any event.
+    event_type = (event_type or "").strip().upper()
 
     # Bounty: verify GitHub issue if URL is a GitHub issue
     if event_type == "BOUNTY":
@@ -113,8 +121,11 @@ def cross_reference_check(event_type: str, application_url: str,
         check_url = application_url or source_url
         if check_url:
             try:
-                with httpx.Client(timeout=10.0) as client:
+                with httpx.Client(timeout=10.0, headers={"User-Agent": "Web3GrantRadar-Verifier/1.0"}) as client:
                     resp = client.head(check_url, follow_redirects=True)
+                    if resp.status_code in HEAD_REJECTED_STATUSES:
+                        # Many sites refuse HEAD although the page is up.
+                        resp = client.get(check_url, follow_redirects=True)
                     if resp.status_code < 400:
                         result["passed"] = True
                         result["reason"] = "application_url_reachable"

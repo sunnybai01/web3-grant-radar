@@ -32,7 +32,7 @@ Web3 Grant Radar continuously monitors ecosystem feeds, project websites, Tavily
 - **Two-stage deduplication** — L1 canonical-URL deduplication, followed by L2 semantic deduplication with ChromaDB embeddings and deadline/ecosystem vetoes.
 - **LLM-assisted classification** — keyword prefiltering, then DeepSeek / Qwen / Gemini classification with provider fallback.
 - **Quality gates** — reject opportunities that are not actionable, fall below the minimum reward, or are stale.
-- **Zero-trust verification** — origin anchoring, GitHub/domain cross-checks, and security APIs (GoPlus / CertiK / ScamSniffer). Items judged fraudulent are stopped.
+- **Zero-trust verification** — origin anchoring, a reachability cross-check of the apply/source page, and security APIs: GoPlus's phishing-site check (no key needed) plus CertiK / ScamSniffer when their keys are set. Items flagged as phishing are stopped; only an item that passes all three layers is shown as verified.
 - **Opportunity scoring** — ROI, reputation, timeliness, and strategic fit.
 - **Slack delivery** — Block Kit cards, per-run Markdown reports, and a daily summary.
 - **Triage dashboard** — `apps/chat-web` lists new opportunities for the team to shortlist or dismiss, with on-demand verification, a read-only Copilot, and an operations page for scans, source health, and run logs.

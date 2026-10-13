@@ -163,7 +163,8 @@ def build_opportunity_listing(
     sort = filters.get("sort") if filters.get("sort") in SORT_KEYS else "score"
 
     active = [e for e in events if _triage_status(e) != "dismissed"]
-    verified_count = sum(1 for e in active if e.is_verified)
+    # By verdict: rows verified under older rules still carry is_verified=true.
+    verified_count = sum(1 for e in active if _verification_verdict_from_event(e) == "verified")
     unchecked_count = sum(
         1 for e in active if (e.verification_log or {}).get("verdict") == "unchecked"
     )

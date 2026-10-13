@@ -354,3 +354,17 @@ def test_a_date_only_deadline_today_is_still_closing_soon() -> None:
     listing = dashboard_service.build_opportunity_listing([today], {}, now=NOW)
 
     assert listing["metrics"]["closing_soon"] == 1
+
+
+def test_verified_metric_counts_verdicts_not_the_legacy_flag() -> None:
+    """25 degraded Events still carried is_verified=true, so the header read 58%."""
+    events = [
+        _event(1, is_verified=True, verification_log={"verdict": "degraded"}),
+        _event(2, is_verified=True, verification_log={"verdict": "degraded"}),
+        _event(3, is_verified=False, verification_log={"verdict": "verified"}),
+    ]
+
+    metrics = dashboard_service.build_opportunity_listing(events, {}, now=NOW)["metrics"]
+
+    assert metrics["verified_count"] == 1
+    assert metrics["verified_percent"] == 33

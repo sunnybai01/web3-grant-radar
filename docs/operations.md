@@ -159,6 +159,12 @@ docker compose exec -T postgres psql -U web3agent -d web3agent -c "select id, so
 docker compose run --rm pipeline python -m scripts.migrate_events_amount_usd_rolling
 ```
 
+重新校验：校验结论只在事件创建时记录一次，校验逻辑改了之后，已有事件的结论还是旧规则算的。下面的脚本按当前规则重新校验所有在线事件（每个事件发一次可访问性检查和一次 GoPlus 查询），先加 `--dry-run` 看结果：
+
+```bash
+docker compose run --rm pipeline python -m scripts.reverify_events --dry-run
+```
+
 去重索引维护：把已有事件的生态字段归一（`bnb chain`、`binance` → `bnb`），并用当前的向量文本（标题 + 描述）重建全部事件的向量。改过向量文本或生态映射之后执行一次，可以重复执行；先加 `--dry-run` 看会改什么：
 
 ```bash

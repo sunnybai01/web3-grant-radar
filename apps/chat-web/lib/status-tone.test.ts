@@ -14,6 +14,15 @@ it("maps source health and verification verdicts", () => {
   expect(sourceHealthTone("down")).toBe("danger");
   expect(verificationTone("unchecked", false)).toBe("neutral");
   expect(verificationTone("degraded", false)).toBe("warning");
-  expect(verificationTone("anything", true)).toBe("success");
   expect(verificationLabel("unknown", false)).toBe("Unchecked");
+});
+
+it("colours and labels by verdict only, never by the legacy verified flag", () => {
+  // 25 degraded Events still carried is_verified=true and showed a green Verified badge.
+  expect(verificationTone("degraded", true)).toBe("warning");
+  expect(verificationLabel("degraded", true)).toBe("Degraded");
+  expect(verificationTone("verified", false)).toBe("success");
+  expect(verificationLabel("verified", false)).toBe("Verified");
+  expect(verificationLabel("unverified", false)).toBe("Unchecked");
+  expect(verificationTone("unverified", false)).toBe("neutral");
 });

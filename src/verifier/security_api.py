@@ -39,17 +39,21 @@ def _result(status: str, detail, risk_level: str = "unknown") -> dict:
     }
 
 
-def check_goplus_domain(domain: str) -> dict:
-    """Check a domain against GoPlus Security API."""
-    api_key = settings.GOPLUS_API_KEY
-    if not api_key:
-        return _result(RESULT_UNKNOWN, "goplus_not_configured")
+GOPLUS_PHISHING_SITE_URL = "https://api.gopluslabs.io/api/v1/phishing_site"
 
-    url = "https://api.gopluslabs.io/api/v1/phishing/site"
+
+def check_goplus_domain(domain: str) -> dict:
+    """Check a domain against GoPlus Security's phishing-site API.
+
+    The endpoint answers without a key (rate-limited); a configured key is sent
+    for higher limits. The code used to call /api/v1/phishing/site (404) and only
+    with a key, so no event was ever checked.
+    """
+    api_key = settings.GOPLUS_API_KEY
+    headers = {"Authorization": api_key} if api_key else {}
     try:
         with httpx.Client(timeout=10.0) as client:
-            resp = client.get(url, params={"url": domain},
-                            headers={"Authorization": api_key})
+            resp = client.get(GOPLUS_PHISHING_SITE_URL, params={"url": domain}, headers=headers)
             if resp.status_code != 200:
                 return _result(RESULT_UNKNOWN, f"api_error_{resp.status_code}")
             data = resp.json()
@@ -129,17 +133,15 @@ def security_api_check(url: str) -> dict:
     """Run all security API checks on a URL's domain.
 
     Returns {passed, result, reason, checks: [...], configured: bool}.
-    ``configured`` is False when no provider had a usable key, which the verifier
-    surfaces as "unverified" instead of "verified".
+    ``configured`` is True when at least one provider can be consulted. GoPlus
+    needs no key, so it always is.
     """
     checks: list[dict] = []
     outcome = {
         "layer": "security_api",
         "passed": True,
         "result": RESULT_UNKNOWN,
-        "configured": bool(
-            settings.GOPLUS_API_KEY or settings.CERTIK_API_KEY or settings.SCAMSNIFFER_API_KEY
-        ),
+        "configured": True,
         "checks": checks,
     }
 
