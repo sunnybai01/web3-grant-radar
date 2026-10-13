@@ -30,7 +30,7 @@ Web3 Grant Radar 持续监控各生态公告源、项目官网、Tavily 搜索�
 
 - **多源发现**：支持 RSS、网页抓取、Tavily 搜索、X/Twitter（Twikit），以及平台结构化列表（ETHGlobal 活动、Superteam Earn 资助、Devpost 黑客松），统一在 `config/sources.yaml` 中配置。代码里也提供 GitHub Issue 搜索抓取器，但默认没有配置 GitHub 信息源。
 - **双层去重**：L1 根据规范化 URL 去重；L2 使用 ChromaDB 向量语义去重，并结合截止日期、生态信息进行否决判断。
-- **LLM 辅助分类**：先进行关键词粗筛，再调用 DeepSeek / Qwen / Gemini 分类，并按优先级降级。
+- **LLM 辅助分类**：先进行关键词粗筛，再用 DeepSeek-V4.1-Flash（`deepseek-flash`，思考模式）分类。Qwen 和 Gemini 是可选的降级备份，只在配置了 API Key 时才会启用。
 - **质量门控**：过滤不可执行、低于最低奖励金额或信息过期的机会。
 - **零信任校验**：来源锚定、申请页/来源页的可访问性交叉核对，以及安全 API：GoPlus 钓鱼网站检测（无需 key），配置了 key 时再加上 CertiK / ScamSniffer。被判为钓鱼的项目会终止处理；三层都通过的才显示为已验证。
 - **机会评分**：综合 ROI、声誉、时效性和战略契合度。
@@ -54,7 +54,7 @@ Web3 Grant Radar 持续监控各生态公告源、项目官网、Tavily 搜索�
 | `postgres` | `grant_radar_postgres` | 保存事件、原始信号、信息源健康度和运行日志 |
 | `chromadb` | `grant_radar_chromadb` | L2 语义去重的向量索引，监听 `127.0.0.1:8001` |
 
-Next.js 前端（`apps/chat-web`）不在 Docker 中运行，可以在本地通过 `pnpm dev` 启动，也可以部署到 Vercel。
+本地开发时，Next.js 前端（`apps/chat-web`）不在 Docker 中运行，通过 `pnpm dev` 启动。生产环境由 `docker-compose.prod.yml` 把它作为 `web` 容器，和 Caddy（HTTPS）一起部署在一台 EC2 上，见 [docs/deploy-aws.md](docs/deploy-aws.md)。
 
 ## 机会处理流程
 
@@ -125,7 +125,7 @@ pnpm dev
 |---|---|
 | 数据库 | `POSTGRES_USER`、`POSTGRES_PASSWORD`、`POSTGRES_DB`、`POSTGRES_HOST`、`POSTGRES_PORT` |
 | 向量库 | `CHROMA_HOST`、`CHROMA_PORT` |
-| LLM | `DEEPSEEK_API_KEY`、`QWEN_API_KEY`、`GEMINI_API_KEY`、`LLM_PROVIDER_PRIORITY`（默认：`deepseek,qwen,gemini`）、`LLM_TIMEOUT_SECONDS`、`LLM_MAX_RETRIES` |
+| LLM | `DEEPSEEK_API_KEY`、`DEEPSEEK_MODEL`（默认：`deepseek-flash`）、`DEEPSEEK_THINKING`（默认：`true`；推理按输出 token 计费，实测每次调用多 2–3k token、耗时 12–18 秒，关闭时不到 1 秒）、`QWEN_API_KEY`、`GEMINI_API_KEY`、`LLM_PROVIDER_PRIORITY`（默认：`deepseek,qwen,gemini`）、`LLM_TIMEOUT_SECONDS`、`LLM_MAX_RETRIES` |
 | Slack | `SLACK_BOT_TOKEN`、`SLACK_CHANNEL_ID` |
 | 搜索 | `GITHUB_TOKEN`、`TAVILY_API_KEYS`、`TAVILY_SUCCESS_COOLDOWN_MINUTES`、`TAVILY_MAX_SOURCES_PER_RUN` |
 | 安全 API | `GOPLUS_API_KEY`、`CERTIK_API_KEY`、`SCAMSNIFFER_API_KEY` |
@@ -134,7 +134,7 @@ pnpm dev
 | 过滤 | `MIN_AMOUNT_USD`（默认：`5000`）、`STALE_MAX_AGE_DAYS`（默认：`60`）、`STALE_START_DATE_GRACE_DAYS`（默认：`14`） |
 | Chat API | `CHAT_API_INTERNAL_KEY`：必填，至少 16 位随机字符，并与 `apps/chat-web/.env` 中的值一致；缺失时 `chat-api` 拒绝启动 |
 
-`apps/chat-web/.env` 中的前端变量包括 `CHAT_API_BASE_URL`（例如 `http://127.0.0.1:8000`）、`CHAT_API_INTERNAL_KEY`、`DEEPSEEK_API_KEY`、`DEEPSEEK_BASE_URL` 和 `CHAT_AGENT_MODEL`（默认：`deepseek-chat`）。
+`apps/chat-web/.env` 中的前端变量包括 `CHAT_API_BASE_URL`（例如 `http://127.0.0.1:8000`）、`CHAT_API_INTERNAL_KEY`、`DEEPSEEK_API_KEY`、`DEEPSEEK_BASE_URL`、`CHAT_AGENT_MODEL`（默认：`deepseek-flash`）和 `DEEPSEEK_THINKING`（默认：`true`）。
 
 ## 信息源
 

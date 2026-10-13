@@ -1,0 +1,92 @@
+# Production overlay for the single-EC2 deployment (docs/deploy-aws.md).
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#
+# scripts/deploy/ssm_env.py writes COMPOSE_FILE into the server's .env, so plain
+# `docker compose ps / logs / exec` on the server picks up both files.
+#
+# On top of the base file this adds the dashboard (web) and Caddy, which is the
+# only container listening on public ports and terminates HTTPS. It also keeps
+# runtime state on volumes and ships every container's logs to CloudWatch.
+
+x-cloudwatch-logging: &cloudwatch-logging
+  driver: awslogs
+  options:
+    awslogs-region: ${AWS_REGION:?set AWS_REGION in .env}
+    awslogs-group: ${AWS_LOG_GROUP:-/grant-radar/prod}
+    awslogs-create-group: "true"
+    tag: "{{.Name}}"
+
+# Hostnames of the other containers. Fixed by this file, not configuration.
+x-backend-environment: &backend-environment
+  POSTGRES_HOST: postgres
+  POSTGRES_PORT: "5432"
+  CHROMA_HOST: chromadb
+  CHROMA_PORT: "8000"
+  # twikit saves the X login here; on a volume it survives image rebuilds, so
+  # the account is not logged in again (and flagged) on every deploy.
+  TWITTER_COOKIES_FILE: /app/state/twitter-cookies.json
+
+services:
+  pipeline:
+    environment: *backend-environment
+    volumes:
+      - app_state:/app/state
+      - reports:/app/reports
+    logging: *cloudwatch-logging
+
+  chat-api:
+    environment: *backend-environment
+    volumes:
+      - app_state:/app/state
+      - reports:/app/reports
+    logging: *cloudwatch-logging
+
+  postgres:
+    logging: *cloudwatch-logging
+
+  chromadb:
+    logging: *cloudwatch-logging
+
+  web:
+    build: ./apps/chat-web
+    container_name: grant_radar_web
+    # Only what the dashboard reads, not the whole .env with every API key.
+    environment:
+      CHAT_API_BASE_URL: http://chat-api:8000
+      CHAT_API_INTERNAL_KEY: ${CHAT_API_INTERNAL_KEY:?set CHAT_API_INTERNAL_KEY in .env}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com/v1}
+      CHAT_AGENT_MODEL: ${CHAT_AGENT_MODEL:-deepseek-flash}
+      DEEPSEEK_THINKING: ${DEEPSEEK_THINKING:-true}
+      COPILOTKIT_TELEMETRY_DISABLED: "true"
+    depends_on:
+      chat-api:
+        condition: service_healthy
+    restart: unless-stopped
+    logging: *cloudwatch-logging
+
+  caddy:
+    image: caddy:2.11.7-alpine
+    container_name: grant_radar_caddy
+    environment:
+      SITE_DOMAIN: ${SITE_DOMAIN:-grant-radar.57blocks.com}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # Certificates and ACME account; losing them means re-issuing on every
+      # restart and hitting Let's Encrypt rate limits.
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - web
+    restart: unless-stopped
+    logging: *cloudwatch-logging
+
+volumes:
+  app_state:
+  reports:
+  caddy_data:
+  caddy_config:

@@ -1,6 +1,6 @@
 # Web3 Grant Radar 运维手册
 
-项目概览与快速开始见 [README](../README.zh-CN.md)。本文档汇总日常运维、运行保护机制和常见问题。
+项目概览与快速开始见 [README](../README.zh-CN.md)，AWS 生产部署见 [deploy-aws.md](deploy-aws.md)。本文档汇总日常运维、运行保护机制和常见问题。
 
 以下命令都在仓库根目录执行，使用 Compose 服务名（`pipeline` / `chat-api` / `postgres` / `chromadb`），不依赖具体的容器名。
 

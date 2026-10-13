@@ -69,7 +69,15 @@ class Settings:
         self.LLM_PROVIDER_PRIORITY: str = _str("LLM_PROVIDER_PRIORITY", "deepseek,qwen,gemini")
         # Pinned model ids. Provider fallback silently switched models mid-run, so
         # the choice is now explicit and recorded per call.
-        self.DEEPSEEK_MODEL: str = _str("DEEPSEEK_MODEL", "deepseek-chat")
+        # DeepSeek is the primary provider; Qwen and Gemini are fallbacks that
+        # only take part when their API keys are set. deepseek-flash is
+        # DeepSeek-V4.1-Flash (deepseek-chat is a legacy alias for it).
+        self.DEEPSEEK_MODEL: str = _str("DEEPSEEK_MODEL", "deepseek-flash")
+        # Thinking mode: the model reasons before it answers (default effort
+        # "high"). Measured on deepseek-flash: 2-3k reasoning tokens and 12-18 s
+        # per call, against ~30 tokens and under 1 s with it off. Set to false
+        # to have it answer directly.
+        self.DEEPSEEK_THINKING: bool = _bool("DEEPSEEK_THINKING", True)
         self.QWEN_MODEL: str = _str("QWEN_MODEL", "qwen-turbo-latest")
         self.GEMINI_MODEL: str = _str("GEMINI_MODEL", "gemini-2.0-flash-lite")
         # Backoff applied to a source whose health is "down". Grows with

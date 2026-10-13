@@ -1,7 +1,8 @@
-"""Self-built thin LLM Gateway — unified interface over DeepSeek/Qwen/Gemini.
+"""Self-built thin LLM Gateway — DeepSeek first, Qwen/Gemini as optional fallbacks.
 
 Uses OpenAI-compatible SDK for DeepSeek and Qwen, and Google genai SDK for Gemini.
-Supports automatic fallback through the configured provider priority list.
+Supports automatic fallback through the configured provider priority list; a
+provider without an API key is skipped.
 """
 import logging
 import json
@@ -18,6 +19,12 @@ logger = logging.getLogger(__name__)
 LLM_TIMEOUT_SECONDS = settings.LLM_TIMEOUT_SECONDS
 LLM_MAX_RETRIES = settings.LLM_MAX_RETRIES
 
+# With thinking on, DeepSeek counts the reasoning against max_tokens: at
+# max_tokens=100 it spent all 100 on reasoning and returned no answer. Callers'
+# max_tokens is the budget for the answer, so reasoning gets this on top. Only
+# tokens actually generated are billed; classification calls reasoned 0.7-2.9k.
+DEEPSEEK_REASONING_TOKEN_ALLOWANCE = 8192
+
 # ---------------------------------------------------------------------------
 # Provider registry — each entry produces an OpenAI-compatible client + model id
 # ---------------------------------------------------------------------------
@@ -32,6 +39,14 @@ PROVIDER_CONFIG = {
             base_url=settings.DEEPSEEK_BASE_URL,
             timeout=LLM_TIMEOUT_SECONDS,
             max_retries=LLM_MAX_RETRIES,
+        ),
+        # Sent explicitly either way, so a change of the API default cannot
+        # silently flip the mode.
+        "extra_body": lambda: {
+            "thinking": {"type": "enabled" if settings.DEEPSEEK_THINKING else "disabled"}
+        },
+        "reasoning_allowance": lambda: (
+            DEEPSEEK_REASONING_TOKEN_ALLOWANCE if settings.DEEPSEEK_THINKING else 0
         ),
     },
     "qwen": {
@@ -139,7 +154,9 @@ class LLMGateway:
         json_mode: bool, temperature: float, max_tokens: int,
     ) -> Optional[str]:
         client = self._clients[provider]
-        model = PROVIDER_CONFIG[provider]["model"]
+        cfg = PROVIDER_CONFIG[provider]
+        model = cfg["model"]
+        reasoning_allowance = cfg["reasoning_allowance"]() if "reasoning_allowance" in cfg else 0
 
         kwargs = {
             "model": model,
@@ -148,14 +165,25 @@ class LLMGateway:
                 {"role": "user", "content": user},
             ],
             "temperature": temperature,
-            "max_tokens": max_tokens,
+            "max_tokens": max_tokens + reasoning_allowance,
         }
 
         if json_mode:
             kwargs["response_format"] = {"type": "json_object"}
 
+        if "extra_body" in cfg:
+            kwargs["extra_body"] = cfg["extra_body"]()
+
         resp = client.chat.completions.create(**kwargs)
-        return resp.choices[0].message.content
+        choice = resp.choices[0]
+        if getattr(choice, "finish_reason", None) == "length":
+            # Otherwise indistinguishable from an empty reply: the reasoning
+            # or the answer ran out of max_tokens.
+            logger.warning(
+                "LLM provider '%s' hit max_tokens=%s; the answer is truncated or missing",
+                provider, kwargs["max_tokens"],
+            )
+        return choice.message.content
 
     def _call_gemini(
         self, provider: str, system: str, user: str,

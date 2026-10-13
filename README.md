@@ -30,7 +30,7 @@ Web3 Grant Radar continuously monitors ecosystem feeds, project websites, Tavily
 
 - **Multi-source discovery** — RSS, website scraping, Tavily search, X/Twitter via Twikit, and structured platform listings (ETHGlobal events, Superteam Earn grants, Devpost hackathons), configured centrally in `config/sources.yaml`. A GitHub issue-search fetcher is also available, though no GitHub sources are configured by default.
 - **Two-stage deduplication** — L1 canonical-URL deduplication, followed by L2 semantic deduplication with ChromaDB embeddings and deadline/ecosystem vetoes.
-- **LLM-assisted classification** — keyword prefiltering, then DeepSeek / Qwen / Gemini classification with provider fallback.
+- **LLM-assisted classification** — keyword prefiltering, then classification with DeepSeek-V4.1-Flash (`deepseek-flash`) in thinking mode. Qwen and Gemini are optional fallbacks, used only when their API keys are set.
 - **Quality gates** — reject opportunities that are not actionable, fall below the minimum reward, or are stale.
 - **Zero-trust verification** — origin anchoring, a reachability cross-check of the apply/source page, and security APIs: GoPlus's phishing-site check (no key needed) plus CertiK / ScamSniffer when their keys are set. Items flagged as phishing are stopped; only an item that passes all three layers is shown as verified.
 - **Opportunity scoring** — ROI, reputation, timeliness, and strategic fit.
@@ -54,7 +54,7 @@ The system separates scheduled opportunity discovery from dashboard/API traffic.
 | `postgres` | `grant_radar_postgres` | Events, raw signals, source health, and run logs |
 | `chromadb` | `grant_radar_chromadb` | Vector index for L2 semantic deduplication, listening on `127.0.0.1:8001` |
 
-The Next.js frontend (`apps/chat-web`) runs outside Docker. Start it locally with `pnpm dev` or deploy it to Vercel.
+In local development the Next.js frontend (`apps/chat-web`) runs outside Docker: start it with `pnpm dev`. In production `docker-compose.prod.yml` adds it as a `web` container behind Caddy (HTTPS) on a single EC2 host; see [docs/deploy-aws.md](docs/deploy-aws.md).
 
 ## Opportunity pipeline
 
@@ -125,7 +125,7 @@ Environment variables are read by `config/settings.py`. Recreate the containers 
 |---|---|
 | Database | `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `POSTGRES_HOST`, `POSTGRES_PORT` |
 | Vector store | `CHROMA_HOST`, `CHROMA_PORT` |
-| LLM | `DEEPSEEK_API_KEY`, `QWEN_API_KEY`, `GEMINI_API_KEY`, `LLM_PROVIDER_PRIORITY` (default: `deepseek,qwen,gemini`), `LLM_TIMEOUT_SECONDS`, `LLM_MAX_RETRIES` |
+| LLM | `DEEPSEEK_API_KEY`, `DEEPSEEK_MODEL` (default: `deepseek-flash`), `DEEPSEEK_THINKING` (default: `true`; reasoning is billed as output tokens, measured at 2–3k tokens and 12–18 s per call versus under 1 s with it off), `QWEN_API_KEY`, `GEMINI_API_KEY`, `LLM_PROVIDER_PRIORITY` (default: `deepseek,qwen,gemini`), `LLM_TIMEOUT_SECONDS`, `LLM_MAX_RETRIES` |
 | Slack | `SLACK_BOT_TOKEN`, `SLACK_CHANNEL_ID` |
 | Search | `GITHUB_TOKEN`, `TAVILY_API_KEYS`, `TAVILY_SUCCESS_COOLDOWN_MINUTES`, `TAVILY_MAX_SOURCES_PER_RUN` |
 | Security APIs | `GOPLUS_API_KEY`, `CERTIK_API_KEY`, `SCAMSNIFFER_API_KEY` |
@@ -134,7 +134,7 @@ Environment variables are read by `config/settings.py`. Recreate the containers 
 | Filtering | `MIN_AMOUNT_USD` (default: `5000`), `STALE_MAX_AGE_DAYS` (default: `60`), `STALE_START_DATE_GRACE_DAYS` (default: `14`) |
 | Chat API | `CHAT_API_INTERNAL_KEY`: required, at least 16 random characters, and the same value as in `apps/chat-web/.env`. `chat-api` refuses to start without it |
 
-Frontend variables in `apps/chat-web/.env` include `CHAT_API_BASE_URL` (for example, `http://127.0.0.1:8000`), `CHAT_API_INTERNAL_KEY`, `DEEPSEEK_API_KEY`, `DEEPSEEK_BASE_URL`, and `CHAT_AGENT_MODEL` (default: `deepseek-chat`).
+Frontend variables in `apps/chat-web/.env` include `CHAT_API_BASE_URL` (for example, `http://127.0.0.1:8000`), `CHAT_API_INTERNAL_KEY`, `DEEPSEEK_API_KEY`, `DEEPSEEK_BASE_URL`, `CHAT_AGENT_MODEL` (default: `deepseek-flash`), and `DEEPSEEK_THINKING` (default: `true`).
 
 ## Sources
 
