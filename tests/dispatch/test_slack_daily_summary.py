@@ -192,3 +192,29 @@ def test_summary_table_truncates_beyond_the_row_limit() -> None:
     assert table.count("\n") == SUMMARY_TABLE_ROW_LIMIT + 4  # header + rule + rows + notice
     assert "… 4 more not shown" in table
     assert links == []  # no urls supplied
+
+
+def test_push_new_event_tolerates_a_missing_ecosystem_and_track() -> None:
+    """A Devpost hackathon with no ecosystem crashed the card build (#181 never pushed)."""
+    sent = {}
+
+    class FakeClient:
+        def chat_postMessage(self, **kwargs):
+            sent.update(kwargs)
+            return {"ts": "1.2"}
+
+    dispatcher = SlackDispatcher.__new__(SlackDispatcher)
+    dispatcher._configured = True
+    dispatcher.client = FakeClient()
+    dispatcher.channel_id = "C123"
+
+    ts = dispatcher.push_new_event({
+        "id": 181, "event_type": "hackathon", "title": "SUSTAIN-A-THON 2.0",
+        "amount": "$150,000", "deadline": "2026-10-28", "ecosystem": None, "track": None,
+        "final_score": 4.95, "source_url": "https://sustain-a-thon.devpost.com/",
+        "source_type": "devpost_api",
+    })
+
+    assert ts == "1.2"
+    fields = " ".join(f["text"] for f in sent["blocks"][1]["fields"])
+    assert "None" not in fields

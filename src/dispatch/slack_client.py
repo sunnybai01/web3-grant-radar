@@ -218,8 +218,8 @@ class SlackDispatcher:
         deadline = event.get("deadline") or "Rolling / Not specified"
         if hasattr(deadline, "strftime"):
             deadline = deadline.strftime("%Y-%m-%d")
-        ecosystem = event.get("ecosystem", "Unknown").upper()
-        track = event.get("track", "General")
+        ecosystem = (event.get("ecosystem") or "Unknown").upper()
+        track = event.get("track") or "General"
         score = event.get("final_score", 0)
         source_tier = str(event.get("source_tier") or "").lower()
         official = bool(event.get("official", source_tier == "official"))

@@ -17,6 +17,11 @@ Matching rules, in order:
 4. An exact normalized-title match merges without consulting the embedding
    threshold, which cannot separate "Base Builder Grant Program" reposts from
    each other but can score 0.75 on genuinely different programs.
+5. Platform listings (LISTING_SOURCE_TYPES) publish one entry per opportunity
+   under its own URL: the same listing URL is always the same Event, and an
+   Event that already holds a different listing from the same source is never a
+   match. Templated listing texts embed as near-duplicates of each other (47
+   Superteam grants collapsed into four Events on their first run).
 """
 import logging
 import re
@@ -26,8 +31,9 @@ from typing import Optional, List, Tuple
 from sqlalchemy.orm import Session
 
 from config.settings import settings
-from src.db.models import Event
+from src.db.models import Event, EventSource
 from src.db.queries import add_event_source, insert_event
+from src.fetchers.base import LISTING_SOURCE_TYPES
 from .vector_store import VectorStore
 from .llm_summary import LLMSummaryExtractor
 
@@ -165,6 +171,9 @@ class ContentDeduplicator:
             incoming_title=title,
             incoming_deadline=event_data.get("deadline"),
             incoming_ecosystem=event_data.get("ecosystem"),
+            source_type=source_type,
+            source_name=source_name,
+            source_url=source_url,
         )
 
         if matched_event_id:
@@ -207,8 +216,21 @@ class ContentDeduplicator:
         incoming_deadline=None,
         incoming_ecosystem: Optional[str] = None,
         now: Optional[datetime] = None,
+        source_type: Optional[str] = None,
+        source_name: Optional[str] = None,
+        source_url: Optional[str] = None,
     ) -> Optional[int]:
         """Return the id of an existing Event this candidate duplicates."""
+        listing = source_type in LISTING_SOURCE_TYPES and bool(source_url)
+        if listing:
+            same_listing = (
+                db.query(EventSource.event_id)
+                .filter(EventSource.source_name == source_name, EventSource.source_url == source_url)
+                .first()
+            )
+            if same_listing:
+                return same_listing[0]
+
         try:
             similar = self.vs.search_similar(query_text, n_results=20)
         except Exception as e:
@@ -242,6 +264,8 @@ class ContentDeduplicator:
                 continue
             if self._ecosystem_conflict(incoming_ecosystem, candidate):
                 continue
+            if listing and self._holds_other_listing(db, candidate_id, source_name, source_url):
+                continue
 
             similarity = 1.0 - float(distance)
             title_twin = bool(incoming_norm) and incoming_norm == normalize_title(candidate.title)
@@ -253,6 +277,19 @@ class ContentDeduplicator:
                 return candidate_id
 
         return None
+
+    @staticmethod
+    def _holds_other_listing(db: Session, event_id: int, source_name: str, source_url: str) -> bool:
+        """The Event already carries a different entry from the same listing source."""
+        return db.query(
+            db.query(EventSource)
+            .filter(
+                EventSource.event_id == event_id,
+                EventSource.source_name == source_name,
+                EventSource.source_url != source_url,
+            )
+            .exists()
+        ).scalar()
 
     def index_event(self, event: Event, text: Optional[str] = None) -> bool:
         """Index (or refresh) an Event in the vector store.

@@ -28,7 +28,7 @@ Web3 Grant Radar 持续监控各生态公告源、项目官网、Tavily 搜索�
 
 ## 功能特性
 
-- **多源发现**：支持 RSS、网页抓取、Tavily 搜索和 X/Twitter（Twikit），统一在 `config/sources.yaml` 中配置。代码里也提供 GitHub Issue 搜索抓取器，但默认没有配置 GitHub 信息源。
+- **多源发现**：支持 RSS、网页抓取、Tavily 搜索、X/Twitter（Twikit），以及平台结构化列表（ETHGlobal 活动、Superteam Earn 资助、Devpost 黑客松），统一在 `config/sources.yaml` 中配置。代码里也提供 GitHub Issue 搜索抓取器，但默认没有配置 GitHub 信息源。
 - **双层去重**：L1 根据规范化 URL 去重；L2 使用 ChromaDB 向量语义去重，并结合截止日期、生态信息进行否决判断。
 - **LLM 辅助分类**：先进行关键词粗筛，再调用 DeepSeek / Qwen / Gemini 分类，并按优先级降级。
 - **质量门控**：过滤不可执行、低于最低奖励金额或信息过期的机会。
@@ -138,7 +138,7 @@ pnpm dev
 
 ## 信息源
 
-信息源配置在 `config/sources.yaml`。每项通过 `fetch_method` 指定抓取方式：`rss`、`web_scraper`、`tavily_search`、`github_search` 或 `twitter`。可选元数据包括：
+信息源配置在 `config/sources.yaml`。每项通过 `fetch_method` 指定抓取方式：`rss`、`web_scraper`、`tavily_search`、`github_search`、`twitter`，或者平台结构化列表 `ethglobal_events`、`superteam_grants`、`devpost_api`；后三种每个黑客松或资助生成一条，自带链接、日期和奖金。可选元数据包括：
 
 - `chain`：生态规范 ID；已批准的链列在 `config/chains.yaml` 中。
 - `source_tier`：`official` 或 `discovery`；搜索发现类信息源默认为 `discovery`。

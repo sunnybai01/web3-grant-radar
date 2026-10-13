@@ -102,3 +102,19 @@ def test_comma_thousands_still_parses() -> None:
 def test_zero_means_not_stated(text) -> None:
     """The floor must keep these: 0.0 was being read as "worth nothing"."""
     assert parse_amount_usd(text) is None
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        # Superteam pays in USDG; "up to 200 USDG" read as unknown slipped past the
+        # $5,000 floor and was pushed to Slack.
+        ("up to 200 USDG", 200),
+        ("Up to 10,000 USDG", 10_000),
+        ("5,000 PYUSD", 5_000),
+        ("20k USDe", 20_000),
+        ("1,000 FDUSD", 1_000),
+    ],
+)
+def test_usd_stablecoins_are_read_as_dollars(text, expected) -> None:
+    assert parse_amount_usd(text) == pytest.approx(expected)

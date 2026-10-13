@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 # Longest-first: "usdc" must win over "usd", "weth" over "eth".
 _CURRENCIES = (
-    "usdc", "usdt", "usd", "us$", "eur", "gbp", "cny", "rmb", "jpy",
+    "pyusd", "fdusd", "tusd", "usdc", "usdt", "usdg", "usde", "usds", "usd", "us$", "eur", "gbp", "cny", "rmb", "jpy",
     "weth", "eth", "wbtc", "btc", "sol", "bnb", "matic", "avax", "near",
     "atom", "dot", "sui", "apt", "arb", "dai",
 )
@@ -26,6 +26,9 @@ _CURRENCIES = (
 # silent drop. A ticker missing from this table makes the amount unknown.
 _USD_RATES = {
     "$": 1.0, "usd": 1.0, "us$": 1.0, "usdc": 1.0, "usdt": 1.0, "dai": 1.0,
+    # USD stablecoins. Superteam pays in USDG; unread, "up to 200 USDG" slipped
+    # past the minimum-reward floor.
+    "usdg": 1.0, "pyusd": 1.0, "usde": 1.0, "usds": 1.0, "fdusd": 1.0, "tusd": 1.0,
     "€": 1.1, "eur": 1.1, "£": 1.25, "gbp": 1.25,
     "¥": 0.15, "cny": 0.15, "rmb": 0.15, "jpy": 0.01,
     "eth": 3000.0, "weth": 3000.0, "btc": 60000.0, "wbtc": 60000.0,

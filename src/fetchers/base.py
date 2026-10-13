@@ -18,6 +18,12 @@ logger = logging.getLogger(__name__)
 _SHANGHAI_TZ = ZoneInfo("Asia/Shanghai")
 
 
+# Sources that publish one entry per opportunity under its own URL (platform
+# listings). L2 dedup relies on that: two of their entries with different URLs
+# are different opportunities, and the same URL is always the same one.
+LISTING_SOURCE_TYPES = {"devpost_api", "ethglobal_events", "superteam_grants"}
+
+
 @dataclass
 class FetchedItem:
     """Normalized item returned by any fetcher."""

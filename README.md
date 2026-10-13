@@ -28,7 +28,7 @@ Web3 Grant Radar continuously monitors ecosystem feeds, project websites, Tavily
 
 ## Features
 
-- **Multi-source discovery** — RSS, website scraping, Tavily search, and X/Twitter via Twikit, configured centrally in `config/sources.yaml`. A GitHub issue-search fetcher is also available, though no GitHub sources are configured by default.
+- **Multi-source discovery** — RSS, website scraping, Tavily search, X/Twitter via Twikit, and structured platform listings (ETHGlobal events, Superteam Earn grants, Devpost hackathons), configured centrally in `config/sources.yaml`. A GitHub issue-search fetcher is also available, though no GitHub sources are configured by default.
 - **Two-stage deduplication** — L1 canonical-URL deduplication, followed by L2 semantic deduplication with ChromaDB embeddings and deadline/ecosystem vetoes.
 - **LLM-assisted classification** — keyword prefiltering, then DeepSeek / Qwen / Gemini classification with provider fallback.
 - **Quality gates** — reject opportunities that are not actionable, fall below the minimum reward, or are stale.
@@ -138,7 +138,7 @@ Frontend variables in `apps/chat-web/.env` include `CHAT_API_BASE_URL` (for exam
 
 ## Sources
 
-Sources are defined in `config/sources.yaml`. Each entry selects a `fetch_method`: `rss`, `web_scraper`, `tavily_search`, `github_search`, or `twitter`. Optional metadata includes:
+Sources are defined in `config/sources.yaml`. Each entry selects a `fetch_method`: `rss`, `web_scraper`, `tavily_search`, `github_search`, `twitter`, or one of the structured platform listings `ethglobal_events`, `superteam_grants` and `devpost_api`, which emit one item per hackathon or grant with its own URL, dates and reward. Optional metadata includes:
 
 - `chain` — canonical ecosystem ID; approved chains are listed in `config/chains.yaml`.
 - `source_tier` — `official` or `discovery`. Search-based sources default to `discovery`.

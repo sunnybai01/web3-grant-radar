@@ -475,6 +475,54 @@ sources:
     official: true
     enabled: true
 
+  # ----- Structured platform listings (one item per opportunity) -----
+  # These platforms publish their listings as data, so each opportunity arrives
+  # with its own URL, dates and reward instead of being scraped off a page.
+  - name: ethglobal_events
+    type: ethglobal_events
+    schedule: grant_hackathon
+    category: hackathon
+    ecosystem: ethereum
+    chain: ethereum
+    fetch_method: ethglobal_events
+    source_tier: official
+    signal_type: hackathon
+    official: true
+    enabled: true
+
+  # Solana ecosystem grants. Only grants: Superteam's other listings are bounties,
+  # which are out of scope. Most live grants belong to country chapters and fund
+  # local teams only; they are skipped unless their region is listed below.
+  - name: superteam_grants
+    type: superteam_grants
+    schedule: grant_hackathon
+    category: grant
+    ecosystem: solana
+    chain: solana
+    fetch_method: superteam_grants
+    exclude_regional: true
+    allowed_regions: []          # e.g. [Singapore, UAE] to keep those chapters' grants
+    regional_sponsors: [La Familia]   # chapters not named "Superteam <region>"
+    source_tier: official
+    signal_type: grant
+    official: true
+    enabled: true
+
+  # Devpost hosts many non-crypto events; the Blockchain theme narrows it, and
+  # the listings are third-party, so it stays a discovery source.
+  - name: devpost_blockchain
+    type: devpost_api
+    schedule: grant_hackathon
+    category: hackathon
+    ecosystem: multi
+    chain: multi
+    fetch_method: devpost_api
+    themes: [Blockchain]
+    source_tier: discovery
+    signal_type: hackathon
+    official: false
+    enabled: true
+
   # ----- Tavily discovery (grants & hackathons not covered by any feed) -----
   - name: tavily_grants_discovery
     type: tavily_search
